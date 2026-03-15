@@ -1,10 +1,11 @@
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Inter } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
+import { BackendQueryProvider } from "@/lib/service";
 import { cn } from "@/lib/utils";
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +33,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <ClerkProvider>
-          {children}
+          <BackendQueryProvider>{children}</BackendQueryProvider>
         </ClerkProvider>
       </body>
     </html>

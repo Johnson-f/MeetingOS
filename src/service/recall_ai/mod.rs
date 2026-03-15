@@ -10,4 +10,8 @@ pub use types::{
     GeneratedActionItem, GeneratedNote, GroqSegment, GroqTranscriptionResponse,
     RecallCreateBotRequest, RecallCreatedBot, RecallRecordingMedia,
 };
-pub use utils::{build_dedup_key, normalize_meeting_url, platform_from_url};
+#[allow(unused_imports)]
+pub use utils::{
+    ResolvedMeetingTiming, build_dedup_key, normalize_meeting_url, platform_from_url,
+    resolve_meeting_timing,
+};

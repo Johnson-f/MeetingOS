@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS meetings (
     normalized_meeting_url TEXT NOT NULL,
     original_meeting_url TEXT NOT NULL,
     platform TEXT NOT NULL,
+    meeting_time_mode TEXT NOT NULL DEFAULT 'future' CHECK (meeting_time_mode IN ('future', 'starting_now', 'already_started')),
     dedup_key TEXT NOT NULL,
     scheduled_start_at TEXT,
     scheduled_end_at TEXT,

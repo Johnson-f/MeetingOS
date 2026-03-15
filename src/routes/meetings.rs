@@ -1,7 +1,8 @@
 use axum::{
     Json,
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use clerk_rs::validators::authorizer::ClerkJwt;
 use serde_json::{Value, json};
@@ -14,6 +15,7 @@ use crate::{
     service::{
         recall_ai::{
             RecallCreateBotRequest, build_dedup_key, normalize_meeting_url, platform_from_url,
+            resolve_meeting_timing,
         },
         turso::read_operations::MeetingDraft,
     },
@@ -52,11 +54,20 @@ pub async fn create_meeting(
         .title
         .clone()
         .unwrap_or_else(|| format!("{} meeting", platform_from_url(&payload.meeting_url)));
-    let dedup_key = build_dedup_key(
-        &user.workspace_id,
-        &normalized_url,
+    let timing = resolve_meeting_timing(
+        payload.meeting_time_mode.as_str(),
         payload.join_at.as_deref(),
-    );
+    )
+    .map_err(|error| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "invalid meeting timing for mode {}: {error}",
+                payload.meeting_time_mode.as_str()
+            ),
+        )
+    })?;
+    let dedup_key = build_dedup_key(&user.workspace_id, &normalized_url, &timing.dedup_time_key);
 
     let result = state
         .services
@@ -69,8 +80,9 @@ pub async fn create_meeting(
                 original_meeting_url: payload.meeting_url.clone(),
                 normalized_meeting_url: normalized_url,
                 platform: platform_from_url(&payload.meeting_url),
+                meeting_time_mode: payload.meeting_time_mode.as_str().to_owned(),
                 dedup_key,
-                scheduled_start_at: payload.join_at.clone(),
+                scheduled_start_at: timing.scheduled_start_at.clone(),
             },
         )
         .await?;
@@ -92,7 +104,7 @@ pub async fn create_meeting(
             .create_bot(RecallCreateBotRequest {
                 meeting_url: &payload.meeting_url,
                 bot_name,
-                join_at: payload.join_at.as_deref(),
+                join_at: &timing.recall_join_at,
                 metadata: json!({
                     "meeting_id": existing.id,
                     "workspace_id": user.workspace_id,
@@ -114,7 +126,7 @@ pub async fn create_meeting(
                 &existing.id,
                 &created_bot.recall_bot_id,
                 bot_name,
-                payload.join_at.as_deref(),
+                &timing.recall_join_at,
                 &created_bot.status,
                 &created_bot.raw_json.to_string(),
             )
@@ -270,12 +282,57 @@ pub async fn delete_meeting(
 }
 
 pub async fn get_audio(
-    State(_state): State<AppState>,
-    Extension(_jwt): Extension<ClerkJwt>,
-    Path(_meeting_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    Err(ApiError::new(
-        StatusCode::CONFLICT,
-        "audio storage is not configured yet; the recording pipeline currently stores source media metadata only",
-    ))
+    State(state): State<AppState>,
+    Extension(jwt): Extension<ClerkJwt>,
+    Path(meeting_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let user = current_user(&state, &jwt).await?;
+    state
+        .services
+        .turso
+        .get_meeting_for_user(&user.user_id, &meeting_id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))?;
+
+    let asset = state
+        .services
+        .turso
+        .get_audio_asset_for_meeting(&meeting_id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting has no stored audio asset"))?;
+
+    if !matches!(asset.status.as_deref(), Some("stored"))
+        || asset.storage_bucket.is_none()
+        || asset.storage_key.is_none()
+    {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "audio is not ready for playback yet",
+        ));
+    }
+
+    let storage = state.services.storage.as_ref().ok_or_else(|| {
+        ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage is not configured")
+    })?;
+    let playback_url = storage
+        .presign_audio_get(
+            asset.storage_key.as_deref().unwrap_or_default(),
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .map_err(|error| {
+            ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                format!("failed to create playback url: {error}"),
+            )
+        })?;
+
+    Ok((
+        StatusCode::FOUND,
+        [
+            (header::LOCATION, playback_url),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+    )
+        .into_response())
 }

@@ -1,26 +1,31 @@
 pub mod auth;
 pub mod jobs;
 pub mod recall_ai;
+pub mod storage;
 pub mod turso;
 
 use crate::config::AppConfig;
 use recall_ai::RecallAiClient;
+use storage::StorageClient;
 use turso::client::TursoClient;
 
 #[derive(Clone)]
 pub struct ServiceRegistry {
     pub turso: TursoClient,
     pub recall_ai: Option<RecallAiClient>,
+    pub storage: Option<StorageClient>,
     pub config: AppConfig,
 }
 
 impl ServiceRegistry {
-    pub fn new(config: AppConfig, turso: TursoClient) -> Self {
+    pub async fn new(config: AppConfig, turso: TursoClient) -> Self {
         let recall_ai = RecallAiClient::new(&config.recall_ai);
+        let storage = StorageClient::new(&config.storage).await;
 
         Self {
             turso,
             recall_ai,
+            storage,
             config,
         }
     }
@@ -31,6 +36,10 @@ impl ServiceRegistry {
 
     pub fn groq_ready(&self) -> bool {
         self.config.groq.api_key.is_some()
+    }
+
+    pub fn storage_ready(&self) -> bool {
+        self.storage.is_some()
     }
 
     pub fn turso_ready(&self) -> bool {

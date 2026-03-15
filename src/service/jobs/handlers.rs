@@ -1,10 +1,14 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tracing::warn;
 
 use crate::service::{ServiceRegistry, recall_ai::GroqClient};
 
-use super::constants::{JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_TRANSCRIBE_RECORDING};
+use super::constants::{
+    JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_STORE_RECORDING_AUDIO,
+    JOB_TRANSCRIBE_RECORDING,
+};
 
 pub(super) async fn process_recall_event_job(
     services: &ServiceRegistry,
@@ -89,7 +93,7 @@ pub(super) async fn fetch_recording_media_job(
 
     if media.recording_id.is_none() {
         warn!(meeting_id, "recording metadata not ready yet");
-        return Ok(());
+        anyhow::bail!("recording metadata is not ready yet");
     }
 
     let recording = services
@@ -122,8 +126,8 @@ pub(super) async fn fetch_recording_media_job(
         services
             .turso
             .enqueue_job(
-                JOB_TRANSCRIBE_RECORDING,
-                Some(&format!("transcribe-{}", recording.id)),
+                JOB_STORE_RECORDING_AUDIO,
+                Some(&format!("store-audio-{}", recording.id)),
                 &json!({
                     "meeting_id": meeting_id,
                     "recording_id": recording.id,
@@ -135,11 +139,129 @@ pub(super) async fn fetch_recording_media_job(
     Ok(())
 }
 
+pub(super) async fn store_recording_audio_job(
+    services: &ServiceRegistry,
+    payload: &Value,
+) -> Result<()> {
+    let recording_id = payload
+        .get("recording_id")
+        .and_then(Value::as_str)
+        .context("missing recording_id")?;
+
+    let recording = services
+        .turso
+        .get_recording_with_audio_asset(recording_id)
+        .await?
+        .context("recording asset not found")?;
+    let asset = recording
+        .audio_asset
+        .as_ref()
+        .context("audio asset is not available")?;
+    let storage = services
+        .storage
+        .as_ref()
+        .context("storage is not configured");
+
+    if matches!(asset.status.as_deref(), Some("stored"))
+        && asset.storage_bucket.as_deref().is_some()
+        && asset.storage_key.as_deref().is_some()
+    {
+        services
+            .turso
+            .enqueue_job(
+                JOB_TRANSCRIBE_RECORDING,
+                Some(&format!("transcribe-{}", recording.id)),
+                &json!({
+                    "meeting_id": recording.meeting_id,
+                    "recording_id": recording.id,
+                }),
+            )
+            .await?;
+        return Ok(());
+    }
+
+    if let Err(error) = storage.as_ref() {
+        let _ = services
+            .turso
+            .set_recording_asset_status(recording_id, "audio_mixed_mp3", "upload_failed")
+            .await;
+        return Err(anyhow::anyhow!(error.to_string()));
+    }
+
+    let source_url = asset
+        .source_download_url_last_seen
+        .as_deref()
+        .context("audio source url is missing")?;
+    let mime_type = asset.mime_type.as_deref().unwrap_or("audio/mpeg");
+    let storage = storage.unwrap_or_else(|_| unreachable!());
+
+    services
+        .turso
+        .set_recording_asset_status(recording_id, "audio_mixed_mp3", "uploading")
+        .await?;
+
+    let upload_result = async {
+        let audio_bytes = reqwest::get(source_url).await?.bytes().await?;
+        let checksum_sha256 = format!("{:x}", Sha256::digest(&audio_bytes));
+        let byte_size = audio_bytes.len() as i64;
+        let storage_key = crate::service::storage::StorageClient::audio_object_key(
+            &recording.meeting_id,
+            &recording.id,
+        );
+
+        storage
+            .upload_audio(&storage_key, audio_bytes.to_vec(), mime_type)
+            .await?;
+
+        services
+            .turso
+            .mark_recording_asset_stored(
+                recording_id,
+                "audio_mixed_mp3",
+                storage.bucket(),
+                &storage_key,
+                byte_size,
+                &checksum_sha256,
+                mime_type,
+            )
+            .await?;
+
+        services
+            .turso
+            .enqueue_job(
+                JOB_TRANSCRIBE_RECORDING,
+                Some(&format!("transcribe-{}", recording.id)),
+                &json!({
+                    "meeting_id": recording.meeting_id,
+                    "recording_id": recording.id,
+                }),
+            )
+            .await?;
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    if let Err(error) = upload_result {
+        let _ = services
+            .turso
+            .set_recording_asset_status(recording_id, "audio_mixed_mp3", "upload_failed")
+            .await;
+        return Err(error);
+    }
+
+    Ok(())
+}
+
 pub(super) async fn transcribe_recording_job(
     services: &ServiceRegistry,
     payload: &Value,
 ) -> Result<()> {
     let groq = GroqClient::new(&services.config).context("groq is not configured")?;
+    let storage = services
+        .storage
+        .as_ref()
+        .context("storage is not configured")?;
     let recording_id = payload
         .get("recording_id")
         .and_then(Value::as_str)
@@ -155,17 +277,18 @@ pub(super) async fn transcribe_recording_job(
         .audio_asset
         .as_ref()
         .context("audio asset is not available")?;
-    let source_url = asset
-        .source_download_url_last_seen
+    let storage_key = asset
+        .storage_key
         .as_deref()
-        .context("audio source url is missing")?;
+        .context("stored audio key is missing")?;
 
-    let audio_bytes = reqwest::get(source_url).await?.bytes().await?;
+    if !matches!(asset.status.as_deref(), Some("stored")) || asset.storage_bucket.is_none() {
+        anyhow::bail!("audio asset is not stored yet");
+    }
+
+    let audio_bytes = storage.download_audio(storage_key).await?;
     let groq_response = groq
-        .transcribe(
-            audio_bytes.to_vec(),
-            &services.config.groq.transcription_model,
-        )
+        .transcribe(audio_bytes, &services.config.groq.transcription_model)
         .await?;
 
     let transcription = services

@@ -1,12 +1,17 @@
 use axum::{
     Router,
+    http::{HeaderValue, Method, header},
     routing::{get, post},
 };
 use clerk_rs::validators::axum::ClerkLayer;
 use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
-use tower_http::trace::TraceLayer;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    trace::TraceLayer,
+};
 
 use super::{
+    analytics::analytics_overview,
     meetings::{
         cancel_meeting, create_meeting, delete_meeting, get_audio, get_meeting, get_note,
         list_meetings, me,
@@ -17,6 +22,7 @@ use super::{
 };
 
 pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Router {
+    let cors = build_cors_layer(&state);
     let public_routes = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
@@ -27,6 +33,7 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
 
     let protected_routes = Router::new()
         .route("/api/v1/me", get(me))
+        .route("/api/v1/analytics/overview", get(analytics_overview))
         .route("/api/v1/meetings", post(create_meeting).get(list_meetings))
         .route(
             "/api/v1/meetings/:meeting_id",
@@ -52,5 +59,24 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
+}
+
+fn build_cors_layer(state: &AppState) -> CorsLayer {
+    let origins = state
+        .config
+        .cors_allowed_origins
+        .iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok())
+        .collect::<Vec<_>>();
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+        ])
 }

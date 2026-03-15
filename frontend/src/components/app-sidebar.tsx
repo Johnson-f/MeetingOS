@@ -24,13 +24,13 @@ const data = {
     avatar: "/avatars/shadcn.jpg",
   },
   navMain: [
-    {
-      title: "Dashboard",
-      url: "/dashboard",
-      icon: (
-        <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} />
-      ),
-    },
+    // {
+    //   title: "Dashboard",
+    //   url: "/dashboard",
+    //   icon: (
+    //     <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} />
+    //   ),
+    // },
     {
       title: "Meetings",
       url: "/meetings",

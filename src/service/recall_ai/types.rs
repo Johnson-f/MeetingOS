@@ -5,7 +5,7 @@ use serde_json::Value;
 pub struct RecallCreateBotRequest<'a> {
     pub meeting_url: &'a str,
     pub bot_name: &'a str,
-    pub join_at: Option<&'a str>,
+    pub join_at: &'a str,
     pub metadata: Value,
 }
 

@@ -20,5 +20,6 @@ pub struct ServiceStatusResponse {
     pub role: String,
     pub recall_ai_ready: bool,
     pub groq_ready: bool,
+    pub storage_ready: bool,
     pub turso_ready: bool,
 }

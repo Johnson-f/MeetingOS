@@ -6,8 +6,8 @@ use crate::service::{
     turso::{
         client::{new_id, now_rfc3339},
         read_operations::{
-            RecordingRow, StoredRecordingAudioAsset, StoredRecordingWithAsset, StoredTranscription,
-            helpers::query_optional_string,
+            RecordingRow, StoredMeetingAudioAsset, StoredRecordingAudioAsset,
+            StoredRecordingWithAsset, StoredTranscription, helpers::query_optional_string,
         },
     },
 };
@@ -141,6 +141,61 @@ impl TursoClient {
         Ok(())
     }
 
+    pub async fn set_recording_asset_status(
+        &self,
+        recording_id: &str,
+        asset_kind: &str,
+        status: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        conn.execute(
+            "UPDATE recording_assets SET status = ?, updated_at = ? WHERE recording_id = ? AND asset_kind = ?",
+            (status, now.as_str(), recording_id, asset_kind),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn mark_recording_asset_stored(
+        &self,
+        recording_id: &str,
+        asset_kind: &str,
+        storage_bucket: &str,
+        storage_key: &str,
+        byte_size: i64,
+        checksum_sha256: &str,
+        mime_type: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        conn.execute(
+            "UPDATE recording_assets
+             SET storage_bucket = ?,
+                 storage_key = ?,
+                 byte_size = ?,
+                 checksum_sha256 = ?,
+                 mime_type = ?,
+                 status = 'stored',
+                 updated_at = ?
+             WHERE recording_id = ? AND asset_kind = ?",
+            (
+                storage_bucket,
+                storage_key,
+                byte_size,
+                checksum_sha256,
+                mime_type,
+                now.as_str(),
+                recording_id,
+                asset_kind,
+            ),
+        )
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn get_recording_with_audio_asset(
         &self,
         recording_id: &str,
@@ -152,6 +207,12 @@ impl TursoClient {
                 SELECT
                     r.id,
                     r.meeting_id,
+                    ra.status,
+                    ra.storage_bucket,
+                    ra.storage_key,
+                    ra.mime_type,
+                    ra.byte_size,
+                    ra.checksum_sha256,
                     ra.source_download_url_last_seen
                 FROM recordings r
                 LEFT JOIN recording_assets ra
@@ -167,9 +228,57 @@ impl TursoClient {
             return Ok(Some(StoredRecordingWithAsset {
                 id: row.get::<String>(0)?,
                 meeting_id: row.get::<String>(1)?,
-                audio_asset: Some(StoredRecordingAudioAsset {
-                    source_download_url_last_seen: row.get::<Option<String>>(2)?,
-                }),
+                audio_asset: if row.get::<Option<String>>(2)?.is_some()
+                    || row.get::<Option<String>>(3)?.is_some()
+                    || row.get::<Option<String>>(4)?.is_some()
+                    || row.get::<Option<String>>(8)?.is_some()
+                {
+                    Some(StoredRecordingAudioAsset {
+                        status: row.get::<Option<String>>(2)?,
+                        storage_bucket: row.get::<Option<String>>(3)?,
+                        storage_key: row.get::<Option<String>>(4)?,
+                        mime_type: row.get::<Option<String>>(5)?,
+                        byte_size: row.get::<Option<i64>>(6)?,
+                        checksum_sha256: row.get::<Option<String>>(7)?,
+                        source_download_url_last_seen: row.get::<Option<String>>(8)?,
+                    })
+                } else {
+                    None
+                },
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub async fn get_audio_asset_for_meeting(
+        &self,
+        meeting_id: &str,
+    ) -> Result<Option<StoredMeetingAudioAsset>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                r#"
+                SELECT
+                    ra.status,
+                    ra.storage_bucket,
+                    ra.storage_key
+                FROM recordings r
+                INNER JOIN recording_assets ra
+                    ON ra.recording_id = r.id AND ra.asset_kind = 'audio_mixed_mp3'
+                WHERE r.meeting_id = ?
+                ORDER BY r.created_at DESC
+                LIMIT 1
+                "#,
+                params![meeting_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(Some(StoredMeetingAudioAsset {
+                status: row.get::<Option<String>>(0)?,
+                storage_bucket: row.get::<Option<String>>(1)?,
+                storage_key: row.get::<Option<String>>(2)?,
             }));
         }
 

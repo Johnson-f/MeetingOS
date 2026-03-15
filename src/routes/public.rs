@@ -27,6 +27,7 @@ pub async fn status(State(state): State<AppState>) -> Json<ServiceStatusResponse
         role: format!("{:?}", state.config.role).to_lowercase(),
         recall_ai_ready: state.services.recall_ai_ready(),
         groq_ready: state.services.groq_ready(),
+        storage_ready: state.services.storage_ready(),
         turso_ready: state.services.turso_ready(),
     })
 }

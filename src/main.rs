@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.turso_auth_token.clone(),
     )
     .await?;
-    let services = ServiceRegistry::new(config.clone(), turso);
+    let services = ServiceRegistry::new(config.clone(), turso).await;
 
     match config.role {
         AppRole::Api => run_api(config, services).await?,

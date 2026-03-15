@@ -45,8 +45,11 @@ pub struct GroqConfig {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
+    pub account_id: Option<String>,
     pub bucket: Option<String>,
-    pub public_base_url: Option<String>,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    pub endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +67,7 @@ pub struct AppConfig {
     pub port: u16,
     pub environment: String,
     pub public_app_url: Option<String>,
+    pub cors_allowed_origins: Vec<String>,
     pub turso_database_url: String,
     pub turso_auth_token: String,
     pub clerk_secret_key: String,
@@ -88,6 +92,7 @@ impl AppConfig {
                 .unwrap_or(3000),
             environment: env::var("APP_ENV").unwrap_or_else(|_| "development".to_owned()),
             public_app_url: env::var("APP_PUBLIC_URL").ok(),
+            cors_allowed_origins: cors_allowed_origins_from_env(),
             turso_database_url: env::var("TURSO_DATABASE_URL")
                 .expect("TURSO_DATABASE_URL must be set"),
             turso_auth_token: env::var("TURSO_AUTH_TOKEN").expect("TURSO_AUTH_TOKEN must be set"),
@@ -110,8 +115,11 @@ impl AppConfig {
                     .unwrap_or_else(|_| "llama-3.3-70b-versatile".to_owned()),
             },
             storage: StorageConfig {
+                account_id: env::var("R2_ACCOUNT_ID").ok(),
                 bucket: env::var("R2_BUCKET").ok(),
-                public_base_url: env::var("R2_PUBLIC_BASE_URL").ok(),
+                access_key_id: env::var("R2_ACCESS_KEY_ID").ok(),
+                secret_access_key: env::var("R2_SECRET_ACCESS_KEY").ok(),
+                endpoint: env::var("R2_ENDPOINT").ok(),
             },
             worker: WorkerConfig {
                 poll_interval_ms: env::var("WORKER_POLL_INTERVAL_MS")
@@ -133,4 +141,29 @@ impl AppConfig {
     pub fn socket_address(&self) -> SocketAddr {
         SocketAddr::from((self.host, self.port))
     }
+}
+
+fn cors_allowed_origins_from_env() -> Vec<String> {
+    let from_env = env::var("CORS_ALLOWED_ORIGINS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if !from_env.is_empty() {
+        return from_env;
+    }
+
+    vec![
+        "http://localhost:3000".to_owned(),
+        "http://127.0.0.1:3000".to_owned(),
+        "http://localhost:3001".to_owned(),
+        "http://127.0.0.1:3001".to_owned(),
+    ]
 }

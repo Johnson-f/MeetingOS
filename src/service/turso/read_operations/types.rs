@@ -11,8 +11,9 @@ pub struct MeetingDraft {
     pub original_meeting_url: String,
     pub normalized_meeting_url: String,
     pub platform: String,
+    pub meeting_time_mode: String,
     pub dedup_key: String,
-    pub scheduled_start_at: Option<String>,
+    pub scheduled_start_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -47,8 +48,15 @@ pub struct StoredJob {
     pub max_attempts: i64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StoredRecordingAudioAsset {
+    pub status: Option<String>,
+    pub storage_bucket: Option<String>,
+    pub storage_key: Option<String>,
+    pub mime_type: Option<String>,
+    pub byte_size: Option<i64>,
+    pub checksum_sha256: Option<String>,
     pub source_download_url_last_seen: Option<String>,
 }
 
@@ -58,6 +66,13 @@ pub struct StoredRecordingWithAsset {
     pub id: String,
     pub meeting_id: String,
     pub audio_asset: Option<StoredRecordingAudioAsset>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredMeetingAudioAsset {
+    pub status: Option<String>,
+    pub storage_bucket: Option<String>,
+    pub storage_key: Option<String>,
 }
 
 #[derive(Debug, Clone)]

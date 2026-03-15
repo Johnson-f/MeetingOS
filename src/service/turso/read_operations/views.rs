@@ -59,7 +59,8 @@ impl TursoClient {
                     r.started_at,
                     r.ended_at,
                     ra.status,
-                    ra.source_download_url_last_seen
+                    ra.storage_bucket,
+                    ra.storage_key
                 FROM recordings r
                 LEFT JOIN recording_assets ra
                     ON ra.recording_id = r.id AND ra.asset_kind = 'audio_mixed_mp3'
@@ -80,7 +81,9 @@ impl TursoClient {
                 started_at: row.get::<Option<String>>(4)?,
                 ended_at: row.get::<Option<String>>(5)?,
                 audio_asset_status: row.get::<Option<String>>(6)?,
-                audio_source_download_url_last_seen: row.get::<Option<String>>(7)?,
+                audio_playback_ready: row.get::<Option<String>>(7)?.is_some()
+                    && row.get::<Option<String>>(8)?.is_some()
+                    && matches!(row.get::<Option<String>>(6)?.as_deref(), Some("stored")),
             }));
         }
 

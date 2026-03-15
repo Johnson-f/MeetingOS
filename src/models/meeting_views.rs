@@ -5,6 +5,7 @@ pub struct MeetingListItem {
     pub id: String,
     pub title: String,
     pub platform: String,
+    pub meeting_time_mode: String,
     pub status: String,
     pub processing_status: String,
     pub scheduled_start_at: Option<String>,
@@ -22,6 +23,7 @@ pub struct MeetingDetail {
     pub title: String,
     pub platform: String,
     pub source: String,
+    pub meeting_time_mode: String,
     pub original_meeting_url: String,
     pub normalized_meeting_url: String,
     pub dedup_key: String,
@@ -64,7 +66,7 @@ pub struct RecordingView {
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
     pub audio_asset_status: Option<String>,
-    pub audio_source_download_url_last_seen: Option<String>,
+    pub audio_playback_ready: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

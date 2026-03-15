@@ -1,3 +1,4 @@
+mod analytics;
 mod helpers;
 mod meetings;
 mod public;

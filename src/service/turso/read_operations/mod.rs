@@ -1,3 +1,4 @@
+mod analytics;
 mod events;
 mod helpers;
 mod meetings;
@@ -7,7 +8,7 @@ mod types;
 mod views;
 
 pub use types::{
-    MeetingDraft, RecordingRow, StoredJob, StoredProviderEvent, StoredRecallBot,
-    StoredRecordingAudioAsset, StoredRecordingWithAsset, StoredTranscription, UpsertMeetingResult,
-    UserContext,
+    MeetingDraft, RecordingRow, StoredJob, StoredMeetingAudioAsset, StoredProviderEvent,
+    StoredRecallBot, StoredRecordingAudioAsset, StoredRecordingWithAsset, StoredTranscription,
+    UpsertMeetingResult, UserContext,
 };

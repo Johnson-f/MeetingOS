@@ -18,7 +18,7 @@ impl TursoClient {
         meeting_id: &str,
         recall_bot_id: &str,
         bot_name: &str,
-        join_at: Option<&str>,
+        join_at: &str,
         status: &str,
         request_metadata_json: &str,
     ) -> Result<StoredRecallBot> {
@@ -44,9 +44,15 @@ impl TursoClient {
         )
         .await?;
 
+        let (meeting_status, processing_status) = derive_meeting_statuses(status);
         conn.execute(
-            "UPDATE meetings SET status = ?, updated_at = ? WHERE id = ?",
-            ("scheduled", created_at.as_str(), meeting_id),
+            "UPDATE meetings SET status = ?, processing_status = COALESCE(?, processing_status), updated_at = ? WHERE id = ?",
+            (
+                meeting_status,
+                processing_status,
+                created_at.as_str(),
+                meeting_id,
+            ),
         )
         .await?;
 
@@ -412,5 +418,16 @@ impl TursoClient {
         .await?;
 
         Ok(Some(meeting_id))
+    }
+}
+
+fn derive_meeting_statuses(status: &str) -> (&str, Option<&str>) {
+    match status {
+        "joining" | "joining_call" | "in_waiting_room" => ("joining", Some("pending")),
+        "in_call" | "in_call_recording" | "recording" => ("recording", Some("pending")),
+        "done" => ("processing", Some("processing")),
+        "fatal" => ("failed", Some("failed")),
+        "cancelled" => ("cancelled", Some("cancelled")),
+        _ => ("scheduled", Some("pending")),
     }
 }
