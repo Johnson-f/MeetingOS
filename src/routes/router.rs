@@ -1,0 +1,56 @@
+use axum::{
+    Router,
+    routing::{get, post},
+};
+use clerk_rs::validators::axum::ClerkLayer;
+use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
+use tower_http::trace::TraceLayer;
+
+use super::{
+    meetings::{
+        cancel_meeting, create_meeting, delete_meeting, get_audio, get_meeting, get_note,
+        list_meetings, me,
+    },
+    public::{health, not_implemented, root, status},
+    state::AppState,
+    webhooks::recall_webhook,
+};
+
+pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Router {
+    let public_routes = Router::new()
+        .route("/", get(root))
+        .route("/health", get(health))
+        .route("/api/v1/status", get(status))
+        .route("/api/v1/webhooks/recall", post(recall_webhook))
+        .route("/api/v1/webhooks/google-calendar", post(not_implemented))
+        .route("/api/v1/webhooks/microsoft-graph", post(not_implemented));
+
+    let protected_routes = Router::new()
+        .route("/api/v1/me", get(me))
+        .route("/api/v1/meetings", post(create_meeting).get(list_meetings))
+        .route(
+            "/api/v1/meetings/:meeting_id",
+            get(get_meeting).delete(delete_meeting),
+        )
+        .route("/api/v1/meetings/:meeting_id/cancel", post(cancel_meeting))
+        .route("/api/v1/meetings/:meeting_id/audio", get(get_audio))
+        .route("/api/v1/notes/:meeting_id", get(get_note))
+        .route("/api/v1/calendar/google/connect", post(not_implemented))
+        .route("/api/v1/calendar/google/callback", get(not_implemented))
+        .route("/api/v1/calendar/google/disconnect", post(not_implemented))
+        .route("/api/v1/calendar/google/resync", post(not_implemented))
+        .route("/api/v1/calendar/microsoft/connect", post(not_implemented))
+        .route("/api/v1/calendar/microsoft/callback", get(not_implemented))
+        .route(
+            "/api/v1/calendar/microsoft/disconnect",
+            post(not_implemented),
+        )
+        .route("/api/v1/calendar/microsoft/resync", post(not_implemented))
+        .route_layer(ClerkLayer::new(jwks_provider, None, true));
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
+        .with_state(state)
+        .layer(TraceLayer::new_for_http())
+}
