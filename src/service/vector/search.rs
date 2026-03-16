@@ -5,6 +5,7 @@ use crate::service::ServiceRegistry;
 
 use super::chunker::{TranscriptSegment, chunk_full_text, chunk_transcript};
 use crate::service::qdrant_search::client::ChunkPoint;
+use crate::service::qdrant_search::ChatQAPoint;
 
 /// Vectorize a transcript and store in Qdrant
 pub async fn vectorize_transcript(
@@ -74,5 +75,43 @@ pub async fn vectorize_transcript(
     qdrant.upsert_chunks(points).await?;
 
     info!(meeting_id = %meeting_id, "transcript vectorized and stored in Qdrant");
+    Ok(())
+}
+
+/// Vectorize a chat Q&A pair and store in Qdrant
+pub async fn vectorize_chat_qa(
+    services: &ServiceRegistry,
+    thread_id: &str,
+    user_id: &str,
+    question: &str,
+    answer: &str,
+) -> Result<()> {
+    // Skip if answer is too short or is an error
+    if answer.len() < 50 || answer.starts_with("Error:") {
+        tracing::info!(thread_id = %thread_id, "skipping chat QA vectorization: answer too short or error");
+        return Ok(());
+    }
+
+    let jina = services.jina.as_ref().context("jina not configured")?;
+    let qdrant = services.qdrant.as_ref().context("qdrant not configured")?;
+
+    let text = format!("Q: {}\nA: {}", question, answer);
+    let embeddings = jina.embed(vec![text.clone()], "retrieval.passage").await?;
+
+    if embeddings.is_empty() {
+        anyhow::bail!("no embedding returned for chat QA");
+    }
+
+    let point = ChatQAPoint {
+        id: uuid::Uuid::new_v4().to_string(),
+        user_id: user_id.to_owned(),
+        thread_id: thread_id.to_owned(),
+        text,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        dense_vector: embeddings.into_iter().next().unwrap(),
+    };
+
+    qdrant.upsert_chat_qa_points(vec![point]).await?;
+    tracing::info!(thread_id = %thread_id, "chat QA vectorized");
     Ok(())
 }

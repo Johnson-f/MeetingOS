@@ -5,11 +5,13 @@ import { RecentMeetings } from "@/components/dashboard/recent-meeting";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { ChatProvider } from "@/components/chat";
 
 
 export default function Page() {
   return (
     <RealtimeProvider>
+    <ChatProvider>
     <SidebarProvider
       style={
         {
@@ -36,6 +38,7 @@ export default function Page() {
         </div>
       </SidebarInset>
     </SidebarProvider>
+    </ChatProvider>
     </RealtimeProvider>
   );
 }

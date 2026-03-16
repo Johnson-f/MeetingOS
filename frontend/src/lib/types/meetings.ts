@@ -166,3 +166,29 @@ export interface SearchResponse {
   answer: string;
   sources: SearchSource[];
 }
+
+export interface ChatThread {
+  id: string;
+  user_id: string;
+  workspace_id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessageRecord {
+  id: string;
+  thread_id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources_json: string | null;
+  created_at: string;
+}
+
+export interface ThreadsResponse {
+  threads: ChatThread[];
+}
+
+export interface ThreadMessagesResponse {
+  messages: ChatMessageRecord[];
+}

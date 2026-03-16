@@ -9,6 +9,8 @@ import type {
   NoteResponse,
   SearchResponse,
   ServiceStatusResponse,
+  ThreadMessagesResponse,
+  ThreadsResponse,
   UpdateMeetingPayload,
 } from "@/lib/types";
 
@@ -171,6 +173,33 @@ export class BackendClient {
   resyncGoogleCalendar() {
     return this.request<{ status: string }>("/api/v1/calendar/google/resync", {
       method: "POST",
+    });
+  }
+
+  // Chat Threads
+  listChatThreads(limit?: number) {
+    const params = limit ? `?limit=${limit}` : "";
+    return this.request<ThreadsResponse>(`/api/v1/chat/threads${params}`);
+  }
+
+  getThreadMessages(threadId: string, limit?: number, before?: string) {
+    const params = new URLSearchParams();
+    if (limit) params.set("limit", String(limit));
+    if (before) params.set("before", before);
+    const qs = params.toString();
+    return this.request<ThreadMessagesResponse>(`/api/v1/chat/threads/${threadId}/messages${qs ? `?${qs}` : ""}`);
+  }
+
+  updateThreadTitle(threadId: string, title: string) {
+    return this.request<{ success: boolean }>(`/api/v1/chat/threads/${threadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    });
+  }
+
+  deleteThread(threadId: string) {
+    return this.request<{ success: boolean }>(`/api/v1/chat/threads/${threadId}`, {
+      method: "DELETE",
     });
   }
 

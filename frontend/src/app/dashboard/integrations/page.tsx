@@ -3,10 +3,12 @@ import { IntegrationsView } from "@/components/integrations/integrations-view";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { ChatProvider } from "@/components/chat";
 
 export default function IntegrationsPage() {
   return (
     <RealtimeProvider>
+      <ChatProvider>
       <SidebarProvider
         style={
           {
@@ -25,6 +27,7 @@ export default function IntegrationsPage() {
           </div>
         </SidebarInset>
       </SidebarProvider>
+      </ChatProvider>
     </RealtimeProvider>
   );
 }

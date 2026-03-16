@@ -545,6 +545,20 @@ pub(super) async fn sync_google_calendar_job(
     Ok(())
 }
 
+pub(super) async fn vectorize_chat_qa_job(
+    services: &ServiceRegistry,
+    payload: &Value,
+) -> Result<()> {
+    let thread_id = payload.get("thread_id").and_then(Value::as_str).context("missing thread_id")?;
+    let user_id = payload.get("user_id").and_then(Value::as_str).context("missing user_id")?;
+    let question = payload.get("question").and_then(Value::as_str).context("missing question")?;
+    let answer = payload.get("answer").and_then(Value::as_str).context("missing answer")?;
+
+    info!(thread_id = %thread_id, "vectorizing chat Q&A");
+    crate::service::vector::vectorize_chat_qa(services, thread_id, user_id, question, answer).await?;
+    Ok(())
+}
+
 pub(super) async fn schedule_meeting_bots_job(
     services: &ServiceRegistry,
     _payload: &Value,

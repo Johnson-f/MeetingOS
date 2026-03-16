@@ -1,7 +1,7 @@
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use clerk_rs::validators::axum::ClerkLayer;
 use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
@@ -13,12 +13,12 @@ use tower_http::{
 use super::{
     analytics::analytics_overview,
     calendar::{google_callback, google_connect, google_disconnect, google_resync},
+    chat::{chat_stream, delete_thread, get_thread_messages, list_threads, update_thread},
     events::sse_events,
     meetings::{
         cancel_meeting, create_meeting, delete_meeting, get_audio, get_meeting, get_note,
         list_meetings, me, update_meeting,
     },
-    search::chat_stream,
     public::{health, not_implemented, root, status},
     state::AppState,
     webhooks::recall_webhook,
@@ -41,6 +41,15 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/analytics/overview", get(analytics_overview))
         .route("/api/v1/meetings", post(create_meeting).get(list_meetings))
         .route("/api/v1/chat", post(chat_stream))
+        .route("/api/v1/chat/threads", get(list_threads))
+        .route(
+            "/api/v1/chat/threads/{id}",
+            patch(update_thread).delete(delete_thread),
+        )
+        .route(
+            "/api/v1/chat/threads/{id}/messages",
+            get(get_thread_messages),
+        )
         .route(
             "/api/v1/meetings/{meeting_id}",
             get(get_meeting).patch(update_meeting).delete(delete_meeting),

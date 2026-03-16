@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useMeetingsQuery } from "@/lib/hooks/use-meetings-query"
 import { MeetingsList, LoadingSkeleton } from "./meetings-list"
-import { MeetingChat } from "./meeting-search"
 
 const ACTIVE_STATUSES = new Set(["draft", "scheduled", "joining", "recording", "processing"])
 
@@ -16,7 +15,6 @@ export function MeetingsView() {
 
   return (
     <div>
-      <h1 className="text-lg font-semibold mb-4">Meetings</h1>
       <Tabs defaultValue="all">
         <TabsList>
           <TabsTrigger value="all">
@@ -43,7 +41,6 @@ export function MeetingsView() {
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="chat">Chat</TabsTrigger>
         </TabsList>
         <TabsContent value="all">
           {isLoading ? <LoadingSkeleton /> : <MeetingsList meetings={allMeetings} />}
@@ -53,9 +50,6 @@ export function MeetingsView() {
         </TabsContent>
         <TabsContent value="past">
           {isLoading ? <LoadingSkeleton /> : <MeetingsList meetings={completedMeetings} />}
-        </TabsContent>
-        <TabsContent value="chat">
-          <MeetingChat />
         </TabsContent>
       </Tabs>
     </div>

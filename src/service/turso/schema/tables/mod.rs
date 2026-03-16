@@ -445,4 +445,27 @@ CREATE INDEX IF NOT EXISTS idx_integration_deliveries_meeting_id ON integration_
 CREATE INDEX IF NOT EXISTS idx_share_recipients_meeting_id ON share_recipients(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_email_deliveries_meeting_id ON email_deliveries(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_usage_daily_workspace_id ON usage_daily(workspace_id, usage_date);
+
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    workspace_id TEXT NOT NULL,
+    title TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_threads_user ON chat_threads(user_id, deleted_at);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    sources_json TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (thread_id) REFERENCES chat_threads(id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, created_at);
 "#;

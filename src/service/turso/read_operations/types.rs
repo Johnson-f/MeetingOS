@@ -101,3 +101,23 @@ pub struct RecordingRow {
     pub id: String,
     pub meeting_id: String,
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StoredChatThread {
+    pub id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub title: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StoredChatMessage {
+    pub id: String,
+    pub thread_id: String,
+    pub role: String,
+    pub content: String,
+    pub sources_json: Option<String>,
+    pub created_at: String,
+}

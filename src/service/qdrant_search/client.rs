@@ -39,12 +39,27 @@ pub struct ChunkPoint {
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
-    pub meeting_id: String,
-    pub meeting_title: String,
+    pub source_type: String,
     pub text: String,
-    pub start_ms: i64,
-    pub end_ms: i64,
+    // Transcript-specific
+    pub meeting_id: Option<String>,
+    pub meeting_title: Option<String>,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
     pub speaker_label: Option<String>,
+    // Chat-specific
+    pub thread_id: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatQAPoint {
+    pub id: String,
+    pub user_id: String,
+    pub thread_id: String,
+    pub text: String,
+    pub created_at: String,
+    pub dense_vector: Vec<f32>,
 }
 
 impl QdrantClient {
@@ -115,7 +130,7 @@ impl QdrantClient {
     }
 
     async fn ensure_indexes(&self) -> Result<()> {
-        for field in ["user_id", "meeting_id"] {
+        for field in ["user_id", "meeting_id", "source_type"] {
             let result = self
                 .client
                 .create_field_index(
@@ -143,6 +158,7 @@ impl QdrantClient {
             .into_iter()
             .map(|chunk| {
                 let payload: std::collections::HashMap<String, QdrantValue> = [
+                    ("source_type".to_owned(), QdrantValue::from("transcript")),
                     ("meeting_id".to_owned(), QdrantValue::from(chunk.meeting_id)),
                     ("meeting_title".to_owned(), QdrantValue::from(chunk.meeting_title)),
                     ("user_id".to_owned(), QdrantValue::from(chunk.user_id)),
@@ -174,6 +190,36 @@ impl QdrantClient {
             .context("failed to upsert points to Qdrant")?;
 
         info!(count = count, collection = %self.collection_name, "upserted chunks to Qdrant");
+        Ok(())
+    }
+
+    pub async fn upsert_chat_qa_points(&self, points: Vec<ChatQAPoint>) -> Result<()> {
+        if points.is_empty() {
+            return Ok(());
+        }
+        let qdrant_points: Vec<PointStruct> = points
+            .into_iter()
+            .map(|p| {
+                let mut payload = std::collections::HashMap::new();
+                payload.insert("source_type".to_owned(), QdrantValue::from("chat"));
+                payload.insert("user_id".to_owned(), QdrantValue::from(p.user_id));
+                payload.insert("thread_id".to_owned(), QdrantValue::from(p.thread_id));
+                payload.insert("text".to_owned(), QdrantValue::from(p.text));
+                payload.insert("created_at".to_owned(), QdrantValue::from(p.created_at));
+
+                let vectors: std::collections::HashMap<String, qdrant_client::qdrant::Vector> = [(
+                    DENSE_VECTOR_NAME.to_owned(),
+                    p.dense_vector.into(),
+                )]
+                .into();
+
+                PointStruct::new(p.id, vectors, payload)
+            })
+            .collect();
+        self.client
+            .upsert_points(UpsertPointsBuilder::new(&self.collection_name, qdrant_points))
+            .await
+            .context("failed to upsert chat QA points")?;
         Ok(())
     }
 
@@ -223,17 +269,22 @@ impl QdrantClient {
             .into_iter()
             .filter_map(|point| {
                 let payload = point.payload;
+                let text = payload.get("text")?.as_str()?.to_owned();
+                let source_type = payload
+                    .get("source_type")
+                    .and_then(|v| v.as_str())
+                    .map_or("transcript".to_owned(), |s| s.to_owned());
+
                 Some(SearchResult {
-                    meeting_id: payload.get("meeting_id")?.as_str()?.to_owned(),
-                    meeting_title: payload.get("meeting_title").map(|v| v.to_string()).unwrap_or_default(),
-                    text: payload.get("text")?.as_str()?.to_owned(),
-                    start_ms: payload.get("start_ms")?.as_integer()?,
-                    end_ms: payload.get("end_ms")?.as_integer()?,
-                    speaker_label: payload
-                        .get("speaker_label")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_owned()),
+                    source_type,
+                    text,
+                    meeting_id: payload.get("meeting_id").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                    meeting_title: payload.get("meeting_title").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                    start_ms: payload.get("start_ms").and_then(|v| v.as_integer()),
+                    end_ms: payload.get("end_ms").and_then(|v| v.as_integer()),
+                    speaker_label: payload.get("speaker_label").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                    thread_id: payload.get("thread_id").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                    created_at: payload.get("created_at").and_then(|v| v.as_str()).map(|s| s.to_owned()),
                 })
             })
             .collect();

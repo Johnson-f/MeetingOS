@@ -3,10 +3,12 @@ import { MeetingsView } from "@/components/meetings/meetings-view";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { ChatProvider } from "@/components/chat";
 
 export default function MeetingsPage() {
   return (
     <RealtimeProvider>
+      <ChatProvider>
       <SidebarProvider
         style={
           {
@@ -25,6 +27,7 @@ export default function MeetingsPage() {
           </div>
         </SidebarInset>
       </SidebarProvider>
+      </ChatProvider>
     </RealtimeProvider>
   );
 }
