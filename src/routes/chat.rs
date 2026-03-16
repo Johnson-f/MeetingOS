@@ -3,7 +3,10 @@ use std::convert::Infallible;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
-    response::{IntoResponse, sse::{Event, KeepAlive, Sse}},
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
 };
 use clerk_rs::validators::authorizer::ClerkJwt;
 use serde::Deserialize;
@@ -155,12 +158,9 @@ pub async fn chat_stream(
 
     // 1. Create or validate thread
     let thread = if let Some(ref tid) = payload.thread_id {
-        let existing = turso
-            .get_chat_thread(tid, &user_id)
-            .await
-            .map_err(|e| {
-                ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-            })?;
+        let existing = turso.get_chat_thread(tid, &user_id).await.map_err(|e| {
+            ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
         match existing {
             Some(t) => t,
             None => {
@@ -184,25 +184,19 @@ pub async fn chat_stream(
     turso
         .insert_chat_message(&thread_id, "user", &query, None)
         .await
-        .map_err(|e| {
-            ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 3. Load conversation history
     let history = turso
         .get_recent_thread_messages(&thread_id, 20)
         .await
-        .map_err(|e| {
-            ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // 4. Embed the query
     let query_vectors = jina
         .embed(vec![query.clone()], "retrieval.query")
         .await
-        .map_err(|e| {
-            ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let query_vector = query_vectors.into_iter().next().ok_or_else(|| {
         ApiError::new(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -219,9 +213,7 @@ pub async fn chat_stream(
     let search_results = qdrant
         .hybrid_search(query_vector, filter_user, 15)
         .await
-        .map_err(|e| {
-            ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     info!(results = search_results.len(), "Qdrant search for chat");
 
@@ -243,12 +235,16 @@ pub async fn chat_stream(
         tokio::spawn(async move {
             let no_results_msg =
                 "No relevant transcript content found for your question.".to_string();
-            let _ = tx.send(Ok(Event::default().data(
-                json!({"type": "answer_chunk", "content": no_results_msg}).to_string(),
-            ))).await;
-            let _ = tx.send(Ok(Event::default().data(
-                json!({"type": "done", "sources": []}).to_string(),
-            ))).await;
+            let _ = tx
+                .send(Ok(Event::default().data(
+                    json!({"type": "answer_chunk", "content": no_results_msg}).to_string(),
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(
+                    Event::default().data(json!({"type": "done", "sources": []}).to_string())
+                ))
+                .await;
 
             // Save the assistant message
             if let Err(e) = turso_bg
@@ -294,9 +290,7 @@ pub async fn chat_stream(
     let reranked = jina
         .rerank(&query, documents, 5)
         .await
-        .map_err(|e| {
-            ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let top_results: Vec<_> = reranked
         .results
@@ -365,11 +359,12 @@ pub async fn chat_stream(
 
     // Add conversation history (exclude the user message we just inserted, which is the last one)
     // History is in chronological order; skip the last message since it's the one we just saved
-    let history_to_include = if !history.is_empty() && history.last().map(|m| m.role.as_str()) == Some("user") {
-        &history[..history.len() - 1]
-    } else {
-        &history
-    };
+    let history_to_include =
+        if !history.is_empty() && history.last().map(|m| m.role.as_str()) == Some("user") {
+            &history[..history.len() - 1]
+        } else {
+            &history
+        };
     for msg in history_to_include {
         messages_array.push(json!({
             "role": msg.role,
@@ -529,12 +524,7 @@ pub async fn chat_stream(
         if !full_answer.is_empty() {
             let sources_str = serde_json::to_string(&sources_json).unwrap_or_default();
             if let Err(e) = turso_bg
-                .insert_chat_message(
-                    &thread_id_bg,
-                    "assistant",
-                    &full_answer,
-                    Some(&sources_str),
-                )
+                .insert_chat_message(&thread_id_bg, "assistant", &full_answer, Some(&sources_str))
                 .await
             {
                 error!(error = %e, "failed to save assistant message (stream ended)");
@@ -637,15 +627,13 @@ async fn generate_and_send_title(
         .await;
 
     let title = match result {
-        Ok(resp) => {
-            match resp.json::<Value>().await {
-                Ok(body) => body
-                    .pointer("/choices/0/message/content")
-                    .and_then(Value::as_str)
-                    .map(|s| s.trim().trim_matches('"').to_owned()),
-                Err(_) => None,
-            }
-        }
+        Ok(resp) => match resp.json::<Value>().await {
+            Ok(body) => body
+                .pointer("/choices/0/message/content")
+                .and_then(Value::as_str)
+                .map(|s| s.trim().trim_matches('"').to_owned()),
+            Err(_) => None,
+        },
         Err(_) => None,
     };
 

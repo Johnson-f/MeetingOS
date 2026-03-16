@@ -23,7 +23,10 @@ pub async fn run_worker_loop(services: ServiceRegistry) -> Result<()> {
     // Recover any jobs that were leased but never completed (stale leases from a crash)
     let recovered = services.turso.recover_stale_leases().await?;
     if recovered > 0 {
-        info!(count = recovered, "recovered stale leased jobs from previous run");
+        info!(
+            count = recovered,
+            "recovered stale leased jobs from previous run"
+        );
     }
 
     let lease_owner = format!("worker-{}", uuid::Uuid::new_v4());

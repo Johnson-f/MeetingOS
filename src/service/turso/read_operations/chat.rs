@@ -109,11 +109,7 @@ impl TursoClient {
         Ok(None)
     }
 
-    pub async fn soft_delete_chat_thread(
-        &self,
-        thread_id: &str,
-        user_id: &str,
-    ) -> Result<bool> {
+    pub async fn soft_delete_chat_thread(&self, thread_id: &str, user_id: &str) -> Result<bool> {
         let conn = self.connection().await?;
         let now = now_rfc3339();
 

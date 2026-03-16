@@ -145,15 +145,15 @@ pub async fn migrate(conn: &Connection) -> Result<()> {
             }
 
             // Drop removed columns (skip protected columns that must never be dropped)
-            const PROTECTED_COLUMNS: &[(&str, &str)] = &[
-                ("recording_assets", "checksum_sha256"),
-            ];
+            const PROTECTED_COLUMNS: &[(&str, &str)] = &[("recording_assets", "checksum_sha256")];
 
             let cols_to_drop: Vec<&str> = live_col_names
                 .difference(&desired_col_names)
                 .copied()
                 .filter(|col| {
-                    let dominated = PROTECTED_COLUMNS.iter().any(|(t, c)| t == table_name && c == col);
+                    let dominated = PROTECTED_COLUMNS
+                        .iter()
+                        .any(|(t, c)| t == table_name && c == col);
                     if dominated {
                         warn!("skipping drop of protected column {}.{}", table_name, col);
                     }

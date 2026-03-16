@@ -52,13 +52,18 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         )
         .route(
             "/api/v1/meetings/{meeting_id}",
-            get(get_meeting).patch(update_meeting).delete(delete_meeting),
+            get(get_meeting)
+                .patch(update_meeting)
+                .delete(delete_meeting),
         )
         .route("/api/v1/meetings/{meeting_id}/cancel", post(cancel_meeting))
         .route("/api/v1/meetings/{meeting_id}/audio", get(get_audio))
         .route("/api/v1/notes/{meeting_id}", get(get_note))
         .route("/api/v1/calendar/google/connect", get(google_connect))
-        .route("/api/v1/calendar/google/disconnect", post(google_disconnect))
+        .route(
+            "/api/v1/calendar/google/disconnect",
+            post(google_disconnect),
+        )
         .route("/api/v1/calendar/google/resync", post(google_resync))
         .route("/api/v1/calendar/microsoft/connect", post(not_implemented))
         .route("/api/v1/calendar/microsoft/callback", get(not_implemented))
@@ -87,10 +92,12 @@ fn build_cors_layer(state: &AppState) -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
-        .allow_headers([
-            header::AUTHORIZATION,
-            header::CONTENT_TYPE,
-            header::ACCEPT,
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
         ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::ACCEPT])
 }

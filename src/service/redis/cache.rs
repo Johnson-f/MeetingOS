@@ -35,12 +35,23 @@ fn transcript_key(meeting_id: &str) -> String {
 impl RedisClient {
     // --- Meetings list ---
 
-    pub async fn get_cached_meetings(&self, user_id: &str, limit: usize, offset: usize) -> Result<Option<String>> {
+    pub async fn get_cached_meetings(
+        &self,
+        user_id: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Option<String>> {
         let key = meetings_list_key(user_id, limit, offset);
         self.get(&key).await
     }
 
-    pub async fn set_cached_meetings(&self, user_id: &str, limit: usize, offset: usize, json: &str) -> Result<()> {
+    pub async fn set_cached_meetings(
+        &self,
+        user_id: &str,
+        limit: usize,
+        offset: usize,
+        json: &str,
+    ) -> Result<()> {
         let key = meetings_list_key(user_id, limit, offset);
         self.set(&key, json, MEETINGS_LIST_TTL).await
     }

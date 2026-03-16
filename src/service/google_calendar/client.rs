@@ -66,8 +66,14 @@ impl GoogleCalendarClient {
             .post(GOOGLE_TOKEN_URL)
             .form(&[
                 ("code", code),
-                ("client_id", self.config.client_id.as_deref().unwrap_or_default()),
-                ("client_secret", self.config.client_secret.as_deref().unwrap_or_default()),
+                (
+                    "client_id",
+                    self.config.client_id.as_deref().unwrap_or_default(),
+                ),
+                (
+                    "client_secret",
+                    self.config.client_secret.as_deref().unwrap_or_default(),
+                ),
                 ("redirect_uri", &self.config.redirect_uri),
                 ("grant_type", "authorization_code"),
             ])
@@ -93,8 +99,14 @@ impl GoogleCalendarClient {
             .post(GOOGLE_TOKEN_URL)
             .form(&[
                 ("refresh_token", refresh_token),
-                ("client_id", self.config.client_id.as_deref().unwrap_or_default()),
-                ("client_secret", self.config.client_secret.as_deref().unwrap_or_default()),
+                (
+                    "client_id",
+                    self.config.client_id.as_deref().unwrap_or_default(),
+                ),
+                (
+                    "client_secret",
+                    self.config.client_secret.as_deref().unwrap_or_default(),
+                ),
                 ("grant_type", "refresh_token"),
             ])
             .send()
@@ -178,12 +190,7 @@ impl GoogleCalendarClient {
             }
         }
 
-        let response = self
-            .http
-            .get(&url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
+        let response = self.http.get(&url).bearer_auth(access_token).send().await?;
 
         // If sync token is invalid/expired, Google returns 410 Gone
         if response.status() == 410 {
@@ -251,7 +258,11 @@ impl GoogleCalendarClient {
             resource_id,
             expiration: response
                 .get("expiration")
-                .and_then(|v| v.as_str().map(str::to_owned).or_else(|| v.as_u64().map(|n| n.to_string())))
+                .and_then(|v| {
+                    v.as_str()
+                        .map(str::to_owned)
+                        .or_else(|| v.as_u64().map(|n| n.to_string()))
+                })
                 .unwrap_or_default(),
         })
     }

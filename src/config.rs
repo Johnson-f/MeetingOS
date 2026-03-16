@@ -187,8 +187,9 @@ impl AppConfig {
             google_oauth: GoogleOAuthConfig {
                 client_id: env::var("GOOGLE_CLIENT_ID").ok(),
                 client_secret: env::var("GOOGLE_CLIENT_SECRET").ok(),
-                redirect_uri: env::var("GOOGLE_REDIRECT_URI")
-                    .unwrap_or_else(|_| "http://localhost:8080/api/v1/calendar/google/callback".to_owned()),
+                redirect_uri: env::var("GOOGLE_REDIRECT_URI").unwrap_or_else(|_| {
+                    "http://localhost:8080/api/v1/calendar/google/callback".to_owned()
+                }),
             },
         }
     }

@@ -88,7 +88,15 @@ impl JinaClient {
             .await
             .context("failed to parse Jina embed response")?;
 
-        info!(count = count, dims = response.data.first().map(|d| d.embedding.len()).unwrap_or(0), "embedded texts via Jina");
+        info!(
+            count = count,
+            dims = response
+                .data
+                .first()
+                .map(|d| d.embedding.len())
+                .unwrap_or(0),
+            "embedded texts via Jina"
+        );
         Ok(response.data.into_iter().map(|d| d.embedding).collect())
     }
 
@@ -122,7 +130,11 @@ impl JinaClient {
             .await
             .context("failed to parse Jina rerank response")?;
 
-        info!(input_docs = doc_count, output_docs = response.results.len(), "reranked via Jina");
+        info!(
+            input_docs = doc_count,
+            output_docs = response.results.len(),
+            "reranked via Jina"
+        );
         Ok(response)
     }
 }

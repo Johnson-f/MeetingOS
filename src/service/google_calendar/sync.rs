@@ -31,7 +31,10 @@ pub async fn sync_user_calendar(
         .await?;
 
     if calendars.is_empty() {
-        info!("no calendars found for oauth connection {}", oauth_connection_id);
+        info!(
+            "no calendars found for oauth connection {}",
+            oauth_connection_id
+        );
         return Ok(());
     }
 
@@ -59,7 +62,13 @@ pub async fn sync_user_calendar(
                     // Do a full resync
                     info!(calendar_id = %calendar.id, "sync token expired, doing full resync");
                     google
-                        .list_events(access_token, &calendar.provider_calendar_id, Some(&time_min), Some(&time_max), None)
+                        .list_events(
+                            access_token,
+                            &calendar.provider_calendar_id,
+                            Some(&time_min),
+                            Some(&time_max),
+                            None,
+                        )
                         .await?
                 } else {
                     return Err(e);
@@ -71,7 +80,10 @@ pub async fn sync_user_calendar(
         let mut updated_count = 0;
 
         for event in &events_response.items {
-            let status = event.get("status").and_then(|v| v.as_str()).unwrap_or("confirmed");
+            let status = event
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("confirmed");
             let event_id = match event.get("id").and_then(|v| v.as_str()) {
                 Some(id) => id,
                 None => continue,
@@ -79,9 +91,16 @@ pub async fn sync_user_calendar(
 
             // Handle cancelled events
             if status == "cancelled" {
-                if let Some(existing) = services.turso.get_calendar_event_by_provider_id(&calendar.id, event_id).await? {
+                if let Some(existing) = services
+                    .turso
+                    .get_calendar_event_by_provider_id(&calendar.id, event_id)
+                    .await?
+                {
                     if let Some(meeting_id) = &existing.meeting_id {
-                        services.turso.update_meeting_status(meeting_id, "cancelled", Some("cancelled")).await?;
+                        services
+                            .turso
+                            .update_meeting_status(meeting_id, "cancelled", Some("cancelled"))
+                            .await?;
                         info!(event_id = %event_id, meeting_id = %meeting_id, "cancelled meeting from calendar event");
                     }
                     services.turso.delete_calendar_event(&existing.id).await?;
@@ -116,7 +135,10 @@ pub async fn sync_user_calendar(
                     Some(&meeting_url),
                     starts_at.as_deref(),
                     ends_at.as_deref(),
-                    event.get("organizer").and_then(|v| v.get("email")).and_then(|v| v.as_str()),
+                    event
+                        .get("organizer")
+                        .and_then(|v| v.get("email"))
+                        .and_then(|v| v.as_str()),
                     &event.to_string(),
                 )
                 .await?;
@@ -132,11 +154,7 @@ pub async fn sync_user_calendar(
                 if starts_at.as_deref() != meeting.scheduled_start_at.as_deref() {
                     services
                         .turso
-                        .update_meeting_fields(
-                            &meeting.id,
-                            Some(&title),
-                            starts_at.as_deref(),
-                        )
+                        .update_meeting_fields(&meeting.id, Some(&title), starts_at.as_deref())
                         .await?;
                     updated_count += 1;
                 }

@@ -4,8 +4,8 @@ use tracing::info;
 use crate::service::ServiceRegistry;
 
 use super::chunker::{TranscriptSegment, chunk_full_text, chunk_transcript};
-use crate::service::qdrant_search::client::ChunkPoint;
 use crate::service::qdrant_search::ChatQAPoint;
+use crate::service::qdrant_search::client::ChunkPoint;
 
 /// Vectorize a transcript and store in Qdrant
 pub async fn vectorize_transcript(

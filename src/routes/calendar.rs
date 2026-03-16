@@ -21,11 +21,12 @@ pub async fn google_connect(
 ) -> Result<Response, ApiError> {
     info!(sub = %jwt.sub, "GET /api/v1/calendar/google/connect");
     let user = current_user(&state, &jwt).await?;
-    let google = state
-        .services
-        .google_calendar
-        .as_ref()
-        .ok_or_else(|| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "Google Calendar is not configured"))?;
+    let google = state.services.google_calendar.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Google Calendar is not configured",
+        )
+    })?;
 
     // Use user_id as state parameter for CSRF + user identification
     let state_param = format!("{}:{}", user.user_id, user.workspace_id);
@@ -55,33 +56,41 @@ pub async fn google_callback(
         ));
     }
 
-    let code = query.code.as_deref().ok_or_else(|| {
-        ApiError::new(StatusCode::BAD_REQUEST, "missing authorization code")
-    })?;
+    let code = query
+        .code
+        .as_deref()
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "missing authorization code"))?;
 
-    let state_param = query.state.as_deref().ok_or_else(|| {
-        ApiError::new(StatusCode::BAD_REQUEST, "missing state parameter")
-    })?;
+    let state_param = query
+        .state
+        .as_deref()
+        .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "missing state parameter"))?;
 
     // Parse user_id and workspace_id from state
     let parts: Vec<&str> = state_param.splitn(2, ':').collect();
     if parts.len() != 2 {
-        return Err(ApiError::new(StatusCode::BAD_REQUEST, "invalid state parameter"));
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid state parameter",
+        ));
     }
     let user_id = parts[0];
     let workspace_id = parts[1];
 
-    let google = state
-        .services
-        .google_calendar
-        .as_ref()
-        .ok_or_else(|| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "Google Calendar is not configured"))?;
+    let google = state.services.google_calendar.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Google Calendar is not configured",
+        )
+    })?;
 
     // Exchange code for tokens
-    let tokens = google
-        .exchange_code(code)
-        .await
-        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, format!("token exchange failed: {}", e)))?;
+    let tokens = google.exchange_code(code).await.map_err(|e| {
+        ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            format!("token exchange failed: {}", e),
+        )
+    })?;
 
     let now = now_rfc3339();
     let connection_id = new_id();
@@ -105,7 +114,12 @@ pub async fn google_callback(
     let calendars = google
         .list_calendars(&tokens.access_token)
         .await
-        .map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, format!("failed to list calendars: {}", e)))?;
+        .map_err(|e| {
+            ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                format!("failed to list calendars: {}", e),
+            )
+        })?;
 
     for cal in &calendars {
         state
@@ -191,11 +205,12 @@ pub async fn google_disconnect(
     info!(sub = %jwt.sub, "POST /api/v1/calendar/google/disconnect");
     let user = current_user(&state, &jwt).await?;
 
-    let google = state
-        .services
-        .google_calendar
-        .as_ref()
-        .ok_or_else(|| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "Google Calendar is not configured"))?;
+    let google = state.services.google_calendar.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Google Calendar is not configured",
+        )
+    })?;
 
     // Find the user's Google OAuth connection
     let connection = state
@@ -203,7 +218,9 @@ pub async fn google_disconnect(
         .turso
         .get_oauth_connection(&user.user_id, "google")
         .await?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no Google Calendar connection found"))?;
+        .ok_or_else(|| {
+            ApiError::new(StatusCode::NOT_FOUND, "no Google Calendar connection found")
+        })?;
 
     // Revoke the token
     if let Some(token) = &connection.access_token {
@@ -234,7 +251,9 @@ pub async fn google_resync(
         .turso
         .get_oauth_connection(&user.user_id, "google")
         .await?
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no Google Calendar connection found"))?;
+        .ok_or_else(|| {
+            ApiError::new(StatusCode::NOT_FOUND, "no Google Calendar connection found")
+        })?;
 
     state
         .services

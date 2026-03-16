@@ -35,7 +35,11 @@ pub struct ServiceRegistry {
 }
 
 impl ServiceRegistry {
-    pub async fn new(config: AppConfig, turso: TursoClient, sse_tx: broadcast::Sender<SseEvent>) -> Self {
+    pub async fn new(
+        config: AppConfig,
+        turso: TursoClient,
+        sse_tx: broadcast::Sender<SseEvent>,
+    ) -> Self {
         let recall_ai = RecallAiClient::new(&config.recall_ai);
         let storage = StorageClient::new(&config.storage).await;
         let redis = RedisClient::connect(&config.redis).await;

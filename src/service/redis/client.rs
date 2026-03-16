@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 use tracing::{info, warn};
 
 use crate::config::RedisConfig;

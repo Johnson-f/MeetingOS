@@ -57,7 +57,5 @@ fn is_meeting_url(url: &str) -> bool {
 }
 
 fn find_meeting_url_in_text(text: &str) -> Option<String> {
-    MEETING_URL_REGEX
-        .find(text)
-        .map(|m| m.as_str().to_owned())
+    MEETING_URL_REGEX.find(text).map(|m| m.as_str().to_owned())
 }

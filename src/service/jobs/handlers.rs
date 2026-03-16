@@ -3,7 +3,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
-use crate::{routes::state::SseEvent, service::{ServiceRegistry, recall_ai::GroqClient}};
+use crate::{
+    routes::state::SseEvent,
+    service::{ServiceRegistry, recall_ai::GroqClient},
+};
 
 use crate::service::vector::chunker::TranscriptSegment;
 
@@ -446,18 +449,19 @@ pub(super) async fn vectorize_transcript_job(
         .unwrap_or_default();
 
     // Fetch actual meeting title for chunk context
-    let meeting_title = if let Ok(Some(user_id)) = services.turso.get_meeting_owner(meeting_id).await {
-        services
-            .turso
-            .get_meeting_for_user(&user_id, meeting_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|m| m.title)
-            .unwrap_or_else(|| meeting_id.to_owned())
-    } else {
-        meeting_id.to_owned()
-    };
+    let meeting_title =
+        if let Ok(Some(user_id)) = services.turso.get_meeting_owner(meeting_id).await {
+            services
+                .turso
+                .get_meeting_for_user(&user_id, meeting_id)
+                .await
+                .ok()
+                .flatten()
+                .map(|m| m.title)
+                .unwrap_or_else(|| meeting_id.to_owned())
+        } else {
+            meeting_id.to_owned()
+        };
 
     let segments: Vec<TranscriptSegment> = transcription
         .segments
@@ -513,7 +517,9 @@ pub(super) async fn sync_google_calendar_job(
     let mut access_token = connection.access_token.clone().unwrap_or_default();
 
     // Try to refresh if we have a refresh token
-    if let (Some(google), Some(refresh_token)) = (&services.google_calendar, &connection.refresh_token) {
+    if let (Some(google), Some(refresh_token)) =
+        (&services.google_calendar, &connection.refresh_token)
+    {
         match google.refresh_token(refresh_token).await {
             Ok(tokens) => {
                 access_token = tokens.access_token.clone();
@@ -549,13 +555,26 @@ pub(super) async fn vectorize_chat_qa_job(
     services: &ServiceRegistry,
     payload: &Value,
 ) -> Result<()> {
-    let thread_id = payload.get("thread_id").and_then(Value::as_str).context("missing thread_id")?;
-    let user_id = payload.get("user_id").and_then(Value::as_str).context("missing user_id")?;
-    let question = payload.get("question").and_then(Value::as_str).context("missing question")?;
-    let answer = payload.get("answer").and_then(Value::as_str).context("missing answer")?;
+    let thread_id = payload
+        .get("thread_id")
+        .and_then(Value::as_str)
+        .context("missing thread_id")?;
+    let user_id = payload
+        .get("user_id")
+        .and_then(Value::as_str)
+        .context("missing user_id")?;
+    let question = payload
+        .get("question")
+        .and_then(Value::as_str)
+        .context("missing question")?;
+    let answer = payload
+        .get("answer")
+        .and_then(Value::as_str)
+        .context("missing answer")?;
 
     info!(thread_id = %thread_id, "vectorizing chat Q&A");
-    crate::service::vector::vectorize_chat_qa(services, thread_id, user_id, question, answer).await?;
+    crate::service::vector::vectorize_chat_qa(services, thread_id, user_id, question, answer)
+        .await?;
     Ok(())
 }
 
@@ -654,7 +673,10 @@ pub(super) async fn schedule_meeting_bots_job(
     }
 
     if scheduled_count > 0 {
-        info!(count = scheduled_count, "scheduled bots for calendar meetings");
+        info!(
+            count = scheduled_count,
+            "scheduled bots for calendar meetings"
+        );
     } else {
         info!("no draft calendar meetings need bots right now");
     }

@@ -1,15 +1,13 @@
 use anyhow::{Context, Result};
-use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder,
-    DeletePointsBuilder, Distance, FieldType, Filter, Fusion,
-    PrefetchQueryBuilder, PointStruct, Query, QueryPointsBuilder,
-    SparseVectorConfig, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
-    UpsertPointsBuilder, Value as QdrantValue, VectorParamsBuilder,
-    VectorsConfig, VectorsConfigBuilder,
-};
 use qdrant_client::Qdrant;
+use qdrant_client::qdrant::{
+    Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
+    Distance, FieldType, Filter, Fusion, PointStruct, PrefetchQueryBuilder, Query,
+    QueryPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
+    UpsertPointsBuilder, Value as QdrantValue, VectorParamsBuilder, VectorsConfig,
+    VectorsConfigBuilder,
+};
 use tracing::{info, warn};
-
 
 use crate::config::QdrantConfig;
 
@@ -66,8 +64,7 @@ impl QdrantClient {
     pub async fn connect(config: &QdrantConfig) -> Option<Self> {
         let url = config.url.as_deref()?;
 
-        let mut builder = Qdrant::from_url(url)
-            .skip_compatibility_check();
+        let mut builder = Qdrant::from_url(url).skip_compatibility_check();
         if let Some(api_key) = &config.api_key {
             builder = builder.api_key(api_key.as_str());
         }
@@ -112,7 +109,8 @@ impl QdrantClient {
         );
 
         let mut sparse_vectors_config = SparseVectorsConfigBuilder::default();
-        sparse_vectors_config.add_named_vector_params(SPARSE_VECTOR_NAME, SparseVectorParamsBuilder::default());
+        sparse_vectors_config
+            .add_named_vector_params(SPARSE_VECTOR_NAME, SparseVectorParamsBuilder::default());
 
         self.client
             .create_collection(
@@ -133,13 +131,11 @@ impl QdrantClient {
         for field in ["user_id", "meeting_id", "source_type"] {
             let result = self
                 .client
-                .create_field_index(
-                    CreateFieldIndexCollectionBuilder::new(
-                        &self.collection_name,
-                        field,
-                        FieldType::Keyword,
-                    ),
-                )
+                .create_field_index(CreateFieldIndexCollectionBuilder::new(
+                    &self.collection_name,
+                    field,
+                    FieldType::Keyword,
+                ))
                 .await;
             // Ignore "already exists" errors
             if let Err(e) = &result {
@@ -160,21 +156,27 @@ impl QdrantClient {
                 let payload: std::collections::HashMap<String, QdrantValue> = [
                     ("source_type".to_owned(), QdrantValue::from("transcript")),
                     ("meeting_id".to_owned(), QdrantValue::from(chunk.meeting_id)),
-                    ("meeting_title".to_owned(), QdrantValue::from(chunk.meeting_title)),
+                    (
+                        "meeting_title".to_owned(),
+                        QdrantValue::from(chunk.meeting_title),
+                    ),
                     ("user_id".to_owned(), QdrantValue::from(chunk.user_id)),
-                    ("chunk_index".to_owned(), QdrantValue::from(chunk.chunk_index as i64)),
+                    (
+                        "chunk_index".to_owned(),
+                        QdrantValue::from(chunk.chunk_index as i64),
+                    ),
                     ("text".to_owned(), QdrantValue::from(chunk.text)),
                     ("start_ms".to_owned(), QdrantValue::from(chunk.start_ms)),
                     ("end_ms".to_owned(), QdrantValue::from(chunk.end_ms)),
-                    ("speaker_label".to_owned(), QdrantValue::from(chunk.speaker_label.unwrap_or_default())),
+                    (
+                        "speaker_label".to_owned(),
+                        QdrantValue::from(chunk.speaker_label.unwrap_or_default()),
+                    ),
                 ]
                 .into();
 
-                let vectors: std::collections::HashMap<String, qdrant_client::qdrant::Vector> = [(
-                    DENSE_VECTOR_NAME.to_owned(),
-                    chunk.dense_vector.into(),
-                )]
-                .into();
+                let vectors: std::collections::HashMap<String, qdrant_client::qdrant::Vector> =
+                    [(DENSE_VECTOR_NAME.to_owned(), chunk.dense_vector.into())].into();
 
                 PointStruct::new(chunk.id, vectors, payload)
             })
@@ -207,17 +209,17 @@ impl QdrantClient {
                 payload.insert("text".to_owned(), QdrantValue::from(p.text));
                 payload.insert("created_at".to_owned(), QdrantValue::from(p.created_at));
 
-                let vectors: std::collections::HashMap<String, qdrant_client::qdrant::Vector> = [(
-                    DENSE_VECTOR_NAME.to_owned(),
-                    p.dense_vector.into(),
-                )]
-                .into();
+                let vectors: std::collections::HashMap<String, qdrant_client::qdrant::Vector> =
+                    [(DENSE_VECTOR_NAME.to_owned(), p.dense_vector.into())].into();
 
                 PointStruct::new(p.id, vectors, payload)
             })
             .collect();
         self.client
-            .upsert_points(UpsertPointsBuilder::new(&self.collection_name, qdrant_points))
+            .upsert_points(UpsertPointsBuilder::new(
+                &self.collection_name,
+                qdrant_points,
+            ))
             .await
             .context("failed to upsert chat QA points")?;
         Ok(())
@@ -278,13 +280,28 @@ impl QdrantClient {
                 Some(SearchResult {
                     source_type,
                     text,
-                    meeting_id: payload.get("meeting_id").and_then(|v| v.as_str()).map(|s| s.to_owned()),
-                    meeting_title: payload.get("meeting_title").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                    meeting_id: payload
+                        .get("meeting_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned()),
+                    meeting_title: payload
+                        .get("meeting_title")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned()),
                     start_ms: payload.get("start_ms").and_then(|v| v.as_integer()),
                     end_ms: payload.get("end_ms").and_then(|v| v.as_integer()),
-                    speaker_label: payload.get("speaker_label").and_then(|v| v.as_str()).map(|s| s.to_owned()),
-                    thread_id: payload.get("thread_id").and_then(|v| v.as_str()).map(|s| s.to_owned()),
-                    created_at: payload.get("created_at").and_then(|v| v.as_str()).map(|s| s.to_owned()),
+                    speaker_label: payload
+                        .get("speaker_label")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned()),
+                    thread_id: payload
+                        .get("thread_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned()),
+                    created_at: payload
+                        .get("created_at")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned()),
                 })
             })
             .collect();

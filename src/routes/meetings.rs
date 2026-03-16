@@ -234,7 +234,10 @@ pub async fn list_meetings(
 
     // Try Redis cache first
     if let Some(redis) = &state.services.redis {
-        if let Ok(Some(cached)) = redis.get_cached_meetings(&user.user_id, limit, offset).await {
+        if let Ok(Some(cached)) = redis
+            .get_cached_meetings(&user.user_id, limit, offset)
+            .await
+        {
             info!(sub = %jwt.sub, "cache hit: meetings list");
             if let Ok(value) = serde_json::from_str::<Value>(&cached) {
                 return Ok(Json(value));
@@ -256,7 +259,9 @@ pub async fn list_meetings(
 
     // Write to cache
     if let Some(redis) = &state.services.redis {
-        let _ = redis.set_cached_meetings(&user.user_id, limit, offset, &response.to_string()).await;
+        let _ = redis
+            .set_cached_meetings(&user.user_id, limit, offset, &response.to_string())
+            .await;
     }
 
     Ok(Json(response))
@@ -292,7 +297,9 @@ pub async fn get_meeting(
     // Cache if meeting is completed (transcript won't change)
     if meeting.status == "completed" {
         if let Some(redis) = &state.services.redis {
-            let _ = redis.set_cached_transcript(&meeting_id, &response.to_string()).await;
+            let _ = redis
+                .set_cached_transcript(&meeting_id, &response.to_string())
+                .await;
         }
     }
 
@@ -329,7 +336,9 @@ pub async fn get_note(
     // Cache if note exists and is ready
     if meeting.note.is_some() {
         if let Some(redis) = &state.services.redis {
-            let _ = redis.set_cached_note(&meeting_id, &response.to_string()).await;
+            let _ = redis
+                .set_cached_note(&meeting_id, &response.to_string())
+                .await;
         }
     }
 

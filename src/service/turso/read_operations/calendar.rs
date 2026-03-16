@@ -1,9 +1,9 @@
 use anyhow::Result;
 use libsql::params;
 
-use crate::service::turso::client::{new_id, now_rfc3339};
 use super::super::client::TursoClient;
 use super::helpers::query_optional_string;
+use crate::service::turso::client::{new_id, now_rfc3339};
 
 #[derive(Debug, Clone)]
 pub struct StoredOAuthConnection {
@@ -117,7 +117,8 @@ impl TursoClient {
         conn.execute(
             "UPDATE oauth_connections SET status = 'disconnected', updated_at = ? WHERE id = ?",
             (now_rfc3339(), connection_id),
-        ).await?;
+        )
+        .await?;
         Ok(())
     }
 
@@ -282,7 +283,8 @@ impl TursoClient {
         conn.execute(
             "UPDATE calendar_events SET meeting_id = ?, updated_at = ? WHERE id = ?",
             (meeting_id, now_rfc3339(), calendar_event_id),
-        ).await?;
+        )
+        .await?;
         Ok(())
     }
 
@@ -291,7 +293,8 @@ impl TursoClient {
         conn.execute(
             "DELETE FROM calendar_events WHERE id = ?",
             params![calendar_event_id],
-        ).await?;
+        )
+        .await?;
         Ok(())
     }
 }
