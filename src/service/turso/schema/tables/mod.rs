@@ -1,7 +1,5 @@
 /// Define your schema here. Bump SCHEMA_VERSION in logic.rs when you change this.
 pub const SCHEMA_SQL: &str = r#"
--- rename_table: meetings -> meetings_legacy_v0
-
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     clerk_user_id TEXT NOT NULL UNIQUE,

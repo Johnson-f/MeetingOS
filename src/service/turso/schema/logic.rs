@@ -6,7 +6,7 @@ use tracing::info;
 use super::tables::SCHEMA_SQL;
 
 /// Bump this when you change SCHEMA_SQL and want the diff re-applied.
-pub const SCHEMA_VERSION: &str = "1.1";
+pub const SCHEMA_VERSION: &str = "0.2";
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -31,6 +31,24 @@ pub async fn migrate(conn: &Connection) -> Result<()> {
         SCHEMA_VERSION,
         applied.as_deref().unwrap_or("none")
     );
+
+    // Log all existing tables for diagnostics
+    let live = get_live_tables(conn).await?;
+    let table_names: Vec<&String> = live.keys().collect();
+    info!("existing tables in database: {:?}", table_names);
+
+    // Clean up any leftover legacy tables
+    let legacy_tables = ["meetings_legacy_v0"];
+    for table in &legacy_tables {
+        if table_exists(conn, table).await? {
+            info!("dropping leftover legacy table: {}", table);
+            conn.execute(
+                &format!("DROP TABLE IF EXISTS \"{}\"", table),
+                libsql::params![],
+            )
+            .await?;
+        }
+    }
 
     // Parse rename directives from comments before executing anything
     let table_renames = parse_table_renames(SCHEMA_SQL);
@@ -70,15 +88,16 @@ pub async fn migrate(conn: &Connection) -> Result<()> {
         }
     }
 
-    // Step 3: Create tables first so column diffs can be applied before any
-    // indexes or triggers reference newly added columns.
+    // Step 3: Create tables in a single batch to minimize round-trips.
     let statements = split_sql_statements(SCHEMA_SQL);
-    for stmt in &statements {
-        let trimmed = stmt.trim();
-        if trimmed.is_empty() || !is_create_table_statement(trimmed) {
-            continue;
-        }
-        conn.execute(trimmed, libsql::params![]).await?;
+    let create_tables_sql: String = statements
+        .iter()
+        .filter(|s| !s.trim().is_empty() && is_create_table_statement(s.trim()))
+        .map(|s| format!("{};", s.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !create_tables_sql.is_empty() {
+        conn.execute_batch(&create_tables_sql).await?;
     }
 
     // Step 4: Diff columns — find columns to add or drop
@@ -186,22 +205,18 @@ pub async fn migrate(conn: &Connection) -> Result<()> {
     drop_stale_indexes(conn, SCHEMA_SQL).await?;
     drop_stale_triggers(conn, SCHEMA_SQL).await?;
 
-    // Step 7: Recreate desired indexes/triggers now that tables and columns
-    // are in their final shape for this schema version.
-    for stmt in &statements {
-        let trimmed = stmt.trim();
-        if trimmed.is_empty() || !is_create_index_or_trigger_statement(trimmed) {
-            continue;
-        }
-        conn.execute(trimmed, libsql::params![]).await?;
-    }
-
-    // Record version
-    conn.execute(
-        "INSERT OR REPLACE INTO _schema_version (id, version) VALUES (1, ?)",
-        libsql::params![SCHEMA_VERSION],
-    )
-    .await?;
+    // Step 7: Recreate desired indexes/triggers + record version in a single batch.
+    let mut batch_sql: String = statements
+        .iter()
+        .filter(|s| !s.trim().is_empty() && is_create_index_or_trigger_statement(s.trim()))
+        .map(|s| format!("{};", s.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    batch_sql.push_str(&format!(
+        "\nINSERT OR REPLACE INTO _schema_version (id, version) VALUES (1, '{}');",
+        SCHEMA_VERSION
+    ));
+    conn.execute_batch(&batch_sql).await?;
 
     info!("schema v{} applied successfully", SCHEMA_VERSION);
     Ok(())

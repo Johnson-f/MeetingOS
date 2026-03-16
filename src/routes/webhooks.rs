@@ -6,6 +6,8 @@ use axum::{
 };
 use serde_json::{Value, json};
 
+use tracing::info;
+
 use crate::models::{ApiError, RecallWebhookAck};
 
 use super::{
@@ -60,6 +62,12 @@ pub async fn recall_webhook(
         .to_owned();
     let subject_id = extract_subject_id(&payload);
 
+    info!(
+        event_type = %event_type,
+        subject_id = ?subject_id,
+        "webhook received from Recall"
+    );
+
     let inserted = state
         .services
         .turso
@@ -74,6 +82,7 @@ pub async fn recall_webhook(
         .await?;
 
     if inserted {
+        info!(event_type = %event_type, "event stored, enqueuing job");
         state
             .services
             .turso

@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { Button } from "@/components/ui/button"
 import {
   SidebarGroup,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/sidebar"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { PlusSignCircleIcon, Mail01Icon } from "@hugeicons/core-free-icons"
+import { NewMeetingDialog } from "@/components/new-meeting"
 
 export function NavMain({
   items,
@@ -20,6 +22,8 @@ export function NavMain({
     icon?: React.ReactNode
   }[]
 }) {
+  const [newMeetingOpen, setNewMeetingOpen] = React.useState(false)
+
   return (
     <SidebarGroup>
       <SidebarGroupContent className="flex flex-col gap-2">
@@ -28,6 +32,7 @@ export function NavMain({
             <SidebarMenuButton
               tooltip="New Meeting"
               className="min-w-8 bg-primary text-primary-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
+              onClick={() => setNewMeetingOpen(true)}
             >
               <HugeiconsIcon icon={PlusSignCircleIcon} strokeWidth={2} />
               <span>New Meeting</span>
@@ -53,6 +58,7 @@ export function NavMain({
           ))}
         </SidebarMenu>
       </SidebarGroupContent>
+      <NewMeetingDialog open={newMeetingOpen} onOpenChange={setNewMeetingOpen} />
     </SidebarGroup>
   )
 }

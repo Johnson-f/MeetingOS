@@ -28,6 +28,7 @@ pub async fn run_worker_loop(services: ServiceRegistry) -> Result<()> {
             .await?
         {
             Some(job) => {
+                info!(job_id = %job.id, job_type = %job.job_type, attempt = job.attempt_count, "picked up job");
                 if let Err(error) = process_job(&services, &job.payload_json, &job.job_type).await {
                     warn!(job_id = %job.id, job_type = %job.job_type, %error, "job failed");
 
@@ -53,6 +54,7 @@ pub async fn run_worker_loop(services: ServiceRegistry) -> Result<()> {
                         )
                         .await?;
                 } else {
+                    info!(job_id = %job.id, job_type = %job.job_type, "job completed successfully");
                     services.turso.complete_job(&job.id).await?;
                 }
             }

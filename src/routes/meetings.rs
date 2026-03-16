@@ -7,6 +7,8 @@ use axum::{
 use clerk_rs::validators::authorizer::ClerkJwt;
 use serde_json::{Value, json};
 
+use tracing::info;
+
 use crate::{
     models::{
         ApiError, CreateMeetingRequest, CurrentUserResponse, MeetingActionResponse,
@@ -30,6 +32,7 @@ pub async fn me(
     State(state): State<AppState>,
     Extension(jwt): Extension<ClerkJwt>,
 ) -> Result<Json<CurrentUserResponse>, ApiError> {
+    info!(sub = %jwt.sub, "GET /api/v1/me");
     let user = current_user(&state, &jwt).await?;
     Ok(Json(CurrentUserResponse {
         user_id: user.user_id,
@@ -42,6 +45,7 @@ pub async fn create_meeting(
     Extension(jwt): Extension<ClerkJwt>,
     Json(payload): Json<CreateMeetingRequest>,
 ) -> Result<(StatusCode, Json<MeetingMutationResponse>), ApiError> {
+    info!(sub = %jwt.sub, url = %payload.meeting_url, "POST /api/v1/meetings");
     let user = current_user(&state, &jwt).await?;
     let recall = state
         .services
@@ -100,6 +104,13 @@ pub async fn create_meeting(
             .as_deref()
             .unwrap_or_else(|| recall.default_bot_name());
 
+        info!(
+            meeting_id = %existing.id,
+            bot_name = %bot_name,
+            join_at = %timing.recall_join_at,
+            "creating Recall bot for meeting"
+        );
+
         let created_bot = recall
             .create_bot(RecallCreateBotRequest {
                 meeting_url: &payload.meeting_url,
@@ -119,6 +130,13 @@ pub async fn create_meeting(
                 )
             })?;
 
+        info!(
+            meeting_id = %existing.id,
+            recall_bot_id = %created_bot.recall_bot_id,
+            status = %created_bot.status,
+            "Recall bot created, storing in database"
+        );
+
         state
             .services
             .turso
@@ -131,6 +149,10 @@ pub async fn create_meeting(
                 &created_bot.raw_json.to_string(),
             )
             .await?;
+
+        info!(meeting_id = %existing.id, "Recall bot record stored");
+    } else {
+        info!(meeting_id = %existing.id, "bot already exists, skipping creation");
     }
 
     let detail = state
@@ -158,6 +180,7 @@ pub async fn list_meetings(
     Extension(jwt): Extension<ClerkJwt>,
     Query(query): Query<MeetingsListQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    info!(sub = %jwt.sub, "GET /api/v1/meetings");
     let user = current_user(&state, &jwt).await?;
     let limit = query.limit.unwrap_or(25).min(100);
     let offset = query.offset.unwrap_or(0);
@@ -179,6 +202,7 @@ pub async fn get_meeting(
     Extension(jwt): Extension<ClerkJwt>,
     Path(meeting_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    info!(sub = %jwt.sub, meeting_id = %meeting_id, "GET /api/v1/meetings/{{id}}");
     let user = current_user(&state, &jwt).await?;
     let meeting = state
         .services
@@ -194,6 +218,7 @@ pub async fn get_note(
     Extension(jwt): Extension<ClerkJwt>,
     Path(meeting_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    info!(sub = %jwt.sub, meeting_id = %meeting_id, "GET /api/v1/notes/{{id}}");
     let user = current_user(&state, &jwt).await?;
     let meeting = state
         .services
@@ -209,6 +234,7 @@ pub async fn cancel_meeting(
     Extension(jwt): Extension<ClerkJwt>,
     Path(meeting_id): Path<String>,
 ) -> Result<Json<MeetingActionResponse>, ApiError> {
+    info!(sub = %jwt.sub, meeting_id = %meeting_id, "POST /api/v1/meetings/{{id}}/cancel");
     let user = current_user(&state, &jwt).await?;
     let meeting = state
         .services
@@ -267,6 +293,7 @@ pub async fn delete_meeting(
     Extension(jwt): Extension<ClerkJwt>,
     Path(meeting_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    info!(sub = %jwt.sub, meeting_id = %meeting_id, "DELETE /api/v1/meetings/{{id}}");
     let user = current_user(&state, &jwt).await?;
     let deleted = state
         .services
@@ -286,6 +313,7 @@ pub async fn get_audio(
     Extension(jwt): Extension<ClerkJwt>,
     Path(meeting_id): Path<String>,
 ) -> Result<Response, ApiError> {
+    info!(sub = %jwt.sub, meeting_id = %meeting_id, "GET /api/v1/meetings/{{id}}/audio");
     let user = current_user(&state, &jwt).await?;
     state
         .services

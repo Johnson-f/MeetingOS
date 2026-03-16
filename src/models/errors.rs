@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde_json::json;
+use tracing::error;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -22,12 +23,14 @@ impl ApiError {
 
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
+        error!(error = %error, "internal error");
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        error!(status = %self.status, message = %self.message, "api error");
         (
             self.status,
             Json(json!({

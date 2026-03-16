@@ -36,12 +36,12 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/analytics/overview", get(analytics_overview))
         .route("/api/v1/meetings", post(create_meeting).get(list_meetings))
         .route(
-            "/api/v1/meetings/:meeting_id",
+            "/api/v1/meetings/{meeting_id}",
             get(get_meeting).delete(delete_meeting),
         )
-        .route("/api/v1/meetings/:meeting_id/cancel", post(cancel_meeting))
-        .route("/api/v1/meetings/:meeting_id/audio", get(get_audio))
-        .route("/api/v1/notes/:meeting_id", get(get_note))
+        .route("/api/v1/meetings/{meeting_id}/cancel", post(cancel_meeting))
+        .route("/api/v1/meetings/{meeting_id}/audio", get(get_audio))
+        .route("/api/v1/notes/{meeting_id}", get(get_note))
         .route("/api/v1/calendar/google/connect", post(not_implemented))
         .route("/api/v1/calendar/google/callback", get(not_implemented))
         .route("/api/v1/calendar/google/disconnect", post(not_implemented))
@@ -59,8 +59,8 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .merge(public_routes)
         .merge(protected_routes)
         .with_state(state)
-        .layer(cors)
         .layer(TraceLayer::new_for_http())
+        .layer(cors)
 }
 
 fn build_cors_layer(state: &AppState) -> CorsLayer {

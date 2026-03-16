@@ -160,10 +160,19 @@ fn cors_allowed_origins_from_env() -> Vec<String> {
         return from_env;
     }
 
-    vec![
+    let mut origins = vec![
         "http://localhost:3000".to_owned(),
         "http://127.0.0.1:3000".to_owned(),
         "http://localhost:3001".to_owned(),
         "http://127.0.0.1:3001".to_owned(),
-    ]
+    ];
+
+    if let Ok(ngrok_url) = env::var("NGROK_URL") {
+        let trimmed = ngrok_url.trim().trim_end_matches('/').to_owned();
+        if !trimmed.is_empty() {
+            origins.push(trimmed);
+        }
+    }
+
+    origins
 }

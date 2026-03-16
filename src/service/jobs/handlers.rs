@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::service::{ServiceRegistry, recall_ai::GroqClient};
 
@@ -28,7 +28,10 @@ pub(super) async fn process_recall_event_job(
     let event_payload: Value = serde_json::from_str(&event.payload_json)?;
     let event_type = event.event_type.as_str();
 
+    info!(event_type = %event_type, provider_event_id = %provider_event_id, "processing recall event");
+
     if event_type.starts_with("bot.") {
+        info!(event_type = %event_type, "applying bot status change");
         services
             .turso
             .apply_recall_bot_event(event_type, &event_payload)
@@ -36,6 +39,7 @@ pub(super) async fn process_recall_event_job(
     }
 
     if event_type == "recording.done" {
+        info!("recording.done received, fetching recording media");
         let meeting_id = services
             .turso
             .apply_recall_recording_event(&event_payload)
@@ -88,6 +92,7 @@ pub(super) async fn fetch_recording_media_job(
         .await?
         .context("no recall bot found for meeting")?;
 
+    info!(meeting_id = %meeting_id, recall_bot_id = %bot.recall_bot_id, "fetching recording media from Recall");
     let response = recall.retrieve_bot(&bot.recall_bot_id).await?;
     let media = recall.extract_recording_media(&response);
 
@@ -110,6 +115,7 @@ pub(super) async fn fetch_recording_media_job(
         .await?;
 
     if let Some(url) = media.audio_download_url.as_deref() {
+        info!(meeting_id = %meeting_id, "audio download URL available, enqueuing store job");
         services
             .turso
             .upsert_recording_asset(
@@ -195,6 +201,7 @@ pub(super) async fn store_recording_audio_job(
     let mime_type = asset.mime_type.as_deref().unwrap_or("audio/mpeg");
     let storage = storage.unwrap_or_else(|_| unreachable!());
 
+    info!(recording_id = %recording_id, "downloading audio from Recall and uploading to R2");
     services
         .turso
         .set_recording_asset_status(recording_id, "audio_mixed_mp3", "uploading")
@@ -202,6 +209,7 @@ pub(super) async fn store_recording_audio_job(
 
     let upload_result = async {
         let audio_bytes = reqwest::get(source_url).await?.bytes().await?;
+        info!(recording_id = %recording_id, bytes = audio_bytes.len(), "audio downloaded, uploading to R2");
         let checksum_sha256 = format!("{:x}", Sha256::digest(&audio_bytes));
         let byte_size = audio_bytes.len() as i64;
         let storage_key = crate::service::storage::StorageClient::audio_object_key(
@@ -226,6 +234,7 @@ pub(super) async fn store_recording_audio_job(
             )
             .await?;
 
+        info!(recording_id = %recording_id, "audio stored in R2, enqueuing transcription job");
         services
             .turso
             .enqueue_job(
@@ -286,11 +295,14 @@ pub(super) async fn transcribe_recording_job(
         anyhow::bail!("audio asset is not stored yet");
     }
 
+    info!(recording_id = %recording_id, "downloading audio from R2 for transcription");
     let audio_bytes = storage.download_audio(storage_key).await?;
+    info!(recording_id = %recording_id, bytes = audio_bytes.len(), "sending audio to Groq for transcription");
     let groq_response = groq
         .transcribe(audio_bytes, &services.config.groq.transcription_model)
         .await?;
 
+    info!(recording_id = %recording_id, language = ?groq_response.language, "transcription complete, storing result");
     let transcription = services
         .turso
         .replace_transcription(
@@ -305,6 +317,7 @@ pub(super) async fn transcribe_recording_job(
         )
         .await?;
 
+    info!(meeting_id = %recording.meeting_id, transcription_id = %transcription.id, "enqueuing note generation job");
     services
         .turso
         .enqueue_job(
@@ -337,6 +350,7 @@ pub(super) async fn generate_note_job(services: &ServiceRegistry, payload: &Valu
         .await?
         .context("transcription not found")?;
 
+    info!(meeting_id = %meeting_id, transcription_id = %transcription_id, "sending transcript to Groq for note generation");
     let note = groq
         .generate_note(
             &services.config.groq.notes_model,
@@ -344,6 +358,7 @@ pub(super) async fn generate_note_job(services: &ServiceRegistry, payload: &Valu
         )
         .await?;
 
+    info!(meeting_id = %meeting_id, "note generated, storing in database");
     services
         .turso
         .replace_note(

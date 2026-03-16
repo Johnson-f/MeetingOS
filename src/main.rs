@@ -15,7 +15,10 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    dotenvy::dotenv().ok();
+    match dotenvy::dotenv() {
+        Ok(path) => eprintln!("loaded .env from: {}", path.display()),
+        Err(e) => eprintln!("warning: .env not loaded: {e}"),
+    }
     init_tracing();
 
     let config = AppConfig::from_env();
