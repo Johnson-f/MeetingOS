@@ -1,4 +1,5 @@
 mod analytics;
+mod calendar;
 mod events;
 mod helpers;
 mod meetings;

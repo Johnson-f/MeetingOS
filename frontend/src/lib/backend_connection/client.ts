@@ -157,6 +157,23 @@ export class BackendClient {
     return this.request<{ url: string }>(`/api/v1/meetings/${meetingId}/audio`);
   }
 
+  // Google Calendar
+  getGoogleCalendarConnectUrl() {
+    return this.request<{ url: string }>("/api/v1/calendar/google/connect");
+  }
+
+  disconnectGoogleCalendar() {
+    return this.request<void>("/api/v1/calendar/google/disconnect", {
+      method: "POST",
+    });
+  }
+
+  resyncGoogleCalendar() {
+    return this.request<{ status: string }>("/api/v1/calendar/google/resync", {
+      method: "POST",
+    });
+  }
+
   async fetchMeetingAudioBlob(meetingId: string) {
     const headers = new Headers();
     headers.set("Accept", "audio/mpeg");

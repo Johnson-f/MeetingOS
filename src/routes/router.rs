@@ -1,7 +1,7 @@
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
-    routing::{get, patch, post},
+    routing::{get, post},
 };
 use clerk_rs::validators::axum::ClerkLayer;
 use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
@@ -12,6 +12,7 @@ use tower_http::{
 
 use super::{
     analytics::analytics_overview,
+    calendar::{google_callback, google_connect, google_disconnect, google_resync},
     events::sse_events,
     meetings::{
         cancel_meeting, create_meeting, delete_meeting, get_audio, get_meeting, get_note,
@@ -32,6 +33,7 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/webhooks/recall", post(recall_webhook))
         .route("/api/v1/events", get(sse_events))
         .route("/api/v1/webhooks/google-calendar", post(not_implemented))
+        .route("/api/v1/calendar/google/callback", get(google_callback))
         .route("/api/v1/webhooks/microsoft-graph", post(not_implemented));
 
     let protected_routes = Router::new()
@@ -46,10 +48,9 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/meetings/{meeting_id}/cancel", post(cancel_meeting))
         .route("/api/v1/meetings/{meeting_id}/audio", get(get_audio))
         .route("/api/v1/notes/{meeting_id}", get(get_note))
-        .route("/api/v1/calendar/google/connect", post(not_implemented))
-        .route("/api/v1/calendar/google/callback", get(not_implemented))
-        .route("/api/v1/calendar/google/disconnect", post(not_implemented))
-        .route("/api/v1/calendar/google/resync", post(not_implemented))
+        .route("/api/v1/calendar/google/connect", get(google_connect))
+        .route("/api/v1/calendar/google/disconnect", post(google_disconnect))
+        .route("/api/v1/calendar/google/resync", post(google_resync))
         .route("/api/v1/calendar/microsoft/connect", post(not_implemented))
         .route("/api/v1/calendar/microsoft/callback", get(not_implemented))
         .route(

@@ -4,3 +4,5 @@ pub const JOB_STORE_RECORDING_AUDIO: &str = "store_recording_audio";
 pub const JOB_TRANSCRIBE_RECORDING: &str = "transcribe_recording";
 pub const JOB_GENERATE_NOTE: &str = "generate_note";
 pub const JOB_VECTORIZE_TRANSCRIPT: &str = "vectorize_transcript";
+pub const JOB_SYNC_GOOGLE_CALENDAR: &str = "sync_google_calendar";
+pub const JOB_SCHEDULE_MEETING_BOTS: &str = "schedule_meeting_bots";

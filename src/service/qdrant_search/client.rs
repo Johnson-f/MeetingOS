@@ -41,12 +41,10 @@ pub struct ChunkPoint {
 pub struct SearchResult {
     pub meeting_id: String,
     pub meeting_title: String,
-    pub chunk_index: usize,
     pub text: String,
     pub start_ms: i64,
     pub end_ms: i64,
     pub speaker_label: Option<String>,
-    pub score: f32,
 }
 
 impl QdrantClient {
@@ -228,7 +226,6 @@ impl QdrantClient {
                 Some(SearchResult {
                     meeting_id: payload.get("meeting_id")?.as_str()?.to_owned(),
                     meeting_title: payload.get("meeting_title").map(|v| v.to_string()).unwrap_or_default(),
-                    chunk_index: payload.get("chunk_index")?.as_integer()? as usize,
                     text: payload.get("text")?.as_str()?.to_owned(),
                     start_ms: payload.get("start_ms")?.as_integer()?,
                     end_ms: payload.get("end_ms")?.as_integer()?,
@@ -237,7 +234,6 @@ impl QdrantClient {
                         .and_then(|v| v.as_str())
                         .filter(|s| !s.is_empty())
                         .map(|s| s.to_owned()),
-                    score: point.score,
                 })
             })
             .collect();

@@ -47,8 +47,13 @@ impl StorageClient {
             .endpoint_url(endpoint)
             .load()
             .await;
+        let timeout_config = aws_config::timeout::TimeoutConfig::builder()
+            .read_timeout(Duration::from_secs(600))
+            .connect_timeout(Duration::from_secs(30))
+            .build();
         let sdk_config = aws_sdk_s3::config::Builder::from(&shared_config)
             .force_path_style(true)
+            .timeout_config(timeout_config)
             .build();
 
         Some(Self {
@@ -85,6 +90,7 @@ impl StorageClient {
     }
 
     pub async fn download_audio(&self, key: &str) -> Result<Vec<u8>> {
+        let content_length: Option<i64>;
         let response = self
             .client
             .get_object()
@@ -94,13 +100,18 @@ impl StorageClient {
             .await
             .with_context(|| format!("failed to fetch stored audio object {key}"))?;
 
+        content_length = response.content_length();
+        tracing::info!(key = %key, content_length = ?content_length, "R2 get_object succeeded, reading body stream");
+
         let bytes = response
             .body
             .collect()
             .await
-            .context("failed to read stored audio bytes")?
+            .with_context(|| format!("failed to read stored audio bytes for {key} (content_length={content_length:?})"))?
             .into_bytes()
             .to_vec();
+
+        tracing::info!(key = %key, downloaded_bytes = bytes.len(), "R2 audio download complete");
 
         Ok(bytes)
     }

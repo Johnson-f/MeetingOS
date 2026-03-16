@@ -227,7 +227,11 @@ pub(super) async fn store_recording_audio_job(
         .await?;
 
     let upload_result = async {
-        let audio_bytes = reqwest::get(source_url).await?.bytes().await?;
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(600))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .build()?;
+        let audio_bytes = http.get(source_url).send().await?.bytes().await?;
         info!(recording_id = %recording_id, bytes = audio_bytes.len(), "audio downloaded, uploading to R2");
         let checksum_sha256 = format!("{:x}", Sha256::digest(&audio_bytes));
         let byte_size = audio_bytes.len() as i64;
@@ -316,6 +320,13 @@ pub(super) async fn transcribe_recording_job(
 
     info!(recording_id = %recording_id, "downloading audio from R2 for transcription");
     let audio_bytes = storage.download_audio(storage_key).await?;
+
+    const MIN_AUDIO_BYTES: usize = 10_000;
+    if audio_bytes.len() < MIN_AUDIO_BYTES {
+        warn!(recording_id = %recording_id, bytes = audio_bytes.len(), "audio file too small to be valid, skipping transcription");
+        return Ok(());
+    }
+
     info!(recording_id = %recording_id, bytes = audio_bytes.len(), "sending audio to Groq for transcription");
     let groq_response = groq
         .transcribe(audio_bytes, &services.config.groq.transcription_model)
@@ -470,5 +481,168 @@ pub(super) async fn vectorize_transcript_job(
     .await?;
 
     info!(meeting_id = %meeting_id, "transcript vectorization complete");
+    Ok(())
+}
+
+pub(super) async fn sync_google_calendar_job(
+    services: &ServiceRegistry,
+    payload: &Value,
+) -> Result<()> {
+    let oauth_connection_id = payload
+        .get("oauth_connection_id")
+        .and_then(Value::as_str)
+        .context("missing oauth_connection_id")?;
+    let user_id = payload
+        .get("user_id")
+        .and_then(Value::as_str)
+        .context("missing user_id")?;
+    let workspace_id = payload
+        .get("workspace_id")
+        .and_then(Value::as_str)
+        .context("missing workspace_id")?;
+
+    info!(oauth_connection_id = %oauth_connection_id, "syncing Google Calendar");
+
+    // Get the access token (and refresh if needed)
+    let connection = services
+        .turso
+        .get_oauth_connection(user_id, "google")
+        .await?
+        .context("OAuth connection not found")?;
+
+    let mut access_token = connection.access_token.clone().unwrap_or_default();
+
+    // Try to refresh if we have a refresh token
+    if let (Some(google), Some(refresh_token)) = (&services.google_calendar, &connection.refresh_token) {
+        match google.refresh_token(refresh_token).await {
+            Ok(tokens) => {
+                access_token = tokens.access_token.clone();
+                services
+                    .turso
+                    .update_oauth_tokens(
+                        &connection.id,
+                        &tokens.access_token,
+                        tokens.refresh_token.as_deref(),
+                    )
+                    .await?;
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to refresh Google token, using existing");
+            }
+        }
+    }
+
+    crate::service::google_calendar::sync::sync_user_calendar(
+        services,
+        oauth_connection_id,
+        &access_token,
+        user_id,
+        workspace_id,
+    )
+    .await?;
+
+    info!(oauth_connection_id = %oauth_connection_id, "Google Calendar sync complete");
+    Ok(())
+}
+
+pub(super) async fn schedule_meeting_bots_job(
+    services: &ServiceRegistry,
+    _payload: &Value,
+) -> Result<()> {
+    let recall = services
+        .recall_ai
+        .as_ref()
+        .context("Recall AI is not configured")?;
+
+    // Find meetings from calendar that need bots scheduled
+    // (status = "draft", source = "google_calendar", scheduled_start_at within 12 min)
+    let conn = services.turso.connection().await?;
+    let now = chrono::Utc::now();
+    let threshold = (now + chrono::Duration::minutes(12)).to_rfc3339();
+
+    info!(now = %now.to_rfc3339(), threshold = %threshold, "checking for draft calendar meetings starting within 12 minutes");
+
+    let mut rows = conn
+        .query(
+            r#"
+            SELECT m.id, m.original_meeting_url, m.scheduled_start_at, m.created_by_user_id, m.workspace_id
+            FROM meetings m
+            INNER JOIN meeting_access ma ON ma.meeting_id = m.id
+            WHERE m.status = 'draft'
+              AND m.source = 'google_calendar'
+              AND m.scheduled_start_at IS NOT NULL
+              AND m.scheduled_start_at <= ?
+              AND m.deleted_at IS NULL
+            GROUP BY m.id
+            "#,
+            libsql::params![threshold.as_str()],
+        )
+        .await?;
+
+    let mut scheduled_count = 0;
+    while let Some(row) = rows.next().await? {
+        let meeting_id = row.get::<String>(0)?;
+        let meeting_url = row.get::<String>(1)?;
+        let scheduled_start = row.get::<Option<String>>(2)?;
+        let user_id = row.get::<String>(3)?;
+        let workspace_id = row.get::<String>(4)?;
+
+        // Calculate join_at (10 min before start)
+        let join_at = if let Some(ref start) = scheduled_start {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start) {
+                let join = dt - chrono::Duration::minutes(10);
+                if join.with_timezone(&chrono::Utc) < now {
+                    now.to_rfc3339()
+                } else {
+                    join.to_rfc3339()
+                }
+            } else {
+                now.to_rfc3339()
+            }
+        } else {
+            now.to_rfc3339()
+        };
+
+        let bot_name = recall.default_bot_name();
+        info!(meeting_id = %meeting_id, scheduled_start = ?scheduled_start, join_at = %join_at, meeting_url = %meeting_url, "dispatching bot for calendar meeting");
+
+        match recall
+            .create_bot(crate::service::recall_ai::RecallCreateBotRequest {
+                meeting_url: &meeting_url,
+                bot_name,
+                join_at: &join_at,
+                metadata: serde_json::json!({
+                    "meeting_id": meeting_id,
+                    "workspace_id": workspace_id,
+                    "user_id": user_id,
+                }),
+            })
+            .await
+        {
+            Ok(created_bot) => {
+                services
+                    .turso
+                    .store_recall_bot(
+                        &meeting_id,
+                        &created_bot.recall_bot_id,
+                        bot_name,
+                        &join_at,
+                        &created_bot.status,
+                        &created_bot.raw_json.to_string(),
+                    )
+                    .await?;
+                scheduled_count += 1;
+            }
+            Err(e) => {
+                warn!(meeting_id = %meeting_id, error = %e, "failed to schedule bot for calendar meeting");
+            }
+        }
+    }
+
+    if scheduled_count > 0 {
+        info!(count = scheduled_count, "scheduled bots for calendar meetings");
+    } else {
+        info!("no draft calendar meetings need bots right now");
+    }
     Ok(())
 }

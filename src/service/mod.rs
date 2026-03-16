@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod google_calendar;
 pub mod jina;
 pub mod jobs;
 pub mod qdrant_search;
@@ -12,6 +13,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 
 use crate::{config::AppConfig, routes::state::SseEvent};
+use google_calendar::GoogleCalendarClient;
 use jina::JinaClient;
 use qdrant_search::QdrantClient;
 use recall_ai::RecallAiClient;
@@ -27,6 +29,7 @@ pub struct ServiceRegistry {
     pub redis: Option<RedisClient>,
     pub jina: Option<JinaClient>,
     pub qdrant: Option<QdrantClient>,
+    pub google_calendar: Option<GoogleCalendarClient>,
     pub config: AppConfig,
     pub sse_tx: broadcast::Sender<SseEvent>,
 }
@@ -38,6 +41,7 @@ impl ServiceRegistry {
         let redis = RedisClient::connect(&config.redis).await;
         let jina = JinaClient::new(&config.jina);
         let qdrant = QdrantClient::connect(&config.qdrant).await;
+        let google_calendar = GoogleCalendarClient::new(&config.google_oauth);
 
         info!(
             recall_ai = recall_ai.is_some(),
@@ -45,6 +49,7 @@ impl ServiceRegistry {
             redis = redis.is_some(),
             jina = jina.is_some(),
             qdrant = qdrant.is_some(),
+            google_calendar = google_calendar.is_some(),
             groq = config.groq.api_key.is_some(),
             "services initialized"
         );
@@ -56,6 +61,7 @@ impl ServiceRegistry {
             redis,
             jina,
             qdrant,
+            google_calendar,
             config,
             sse_tx,
         }

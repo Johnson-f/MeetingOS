@@ -49,12 +49,6 @@ pub struct RerankResponse {
 pub struct RerankResult {
     pub index: usize,
     pub relevance_score: f64,
-    pub document: Option<RerankDocument>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RerankDocument {
-    pub text: String,
 }
 
 impl JinaClient {
@@ -115,7 +109,7 @@ impl JinaClient {
                 query: query.to_owned(),
                 documents,
                 top_n,
-                return_documents: true,
+                return_documents: false,
             })
             .send()
             .await?

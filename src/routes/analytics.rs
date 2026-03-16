@@ -7,7 +7,7 @@ use clerk_rs::validators::authorizer::ClerkJwt;
 use tracing::info;
 
 use crate::{
-    models::{AnalyticsOverview, ApiError},
+    models::ApiError,
     routes::{helpers::current_user, state::AppState},
 };
 

@@ -1,10 +1,10 @@
 import { AppSidebar } from "@/components/app-sidebar";
-import { CalendarView } from "@/components/schedule/calendar-view";
+import { IntegrationsView } from "@/components/integrations/integrations-view";
 import { RealtimeProvider } from "@/components/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
-export default function SchedulePage() {
+export default function IntegrationsPage() {
   return (
     <RealtimeProvider>
       <SidebarProvider
@@ -20,8 +20,7 @@ export default function SchedulePage() {
           <SiteHeader />
           <div className="flex flex-1 flex-col">
             <div className="flex flex-1 flex-col gap-4 py-4 px-4 md:gap-6 md:py-6 lg:px-6">
-              <h1 className="text-lg font-semibold">Schedule</h1>
-              <CalendarView />
+              <IntegrationsView />
             </div>
           </div>
         </SidebarInset>

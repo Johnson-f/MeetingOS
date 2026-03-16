@@ -23,12 +23,12 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { MoreVerticalCircle01Icon, UserCircle02Icon, CreditCardIcon, Notification03Icon, Logout01Icon, Sun01Icon, Moon01Icon } from "@hugeicons/core-free-icons"
+import { MoreVerticalCircle01Icon, UserCircle02Icon, Logout01Icon, Sun01Icon, Moon01Icon } from "@hugeicons/core-free-icons"
 
 export function NavUser() {
   const { isMobile } = useSidebar()
   const { user } = useUser()
-  const { signOut } = useClerk()
+  const { signOut, openUserProfile } = useClerk()
   const { theme, setTheme } = useTheme()
 
   const name = user?.fullName ?? user?.firstName ?? "User"
@@ -85,17 +85,9 @@ export function NavUser() {
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openUserProfile()}>
                 <HugeiconsIcon icon={UserCircle02Icon} strokeWidth={2} />
                 Account
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <HugeiconsIcon icon={CreditCardIcon} strokeWidth={2} />
-                Billing
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <HugeiconsIcon icon={Notification03Icon} strokeWidth={2} />
-                Notifications
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
                 <HugeiconsIcon icon={theme === "dark" ? Sun01Icon : Moon01Icon} strokeWidth={2} />

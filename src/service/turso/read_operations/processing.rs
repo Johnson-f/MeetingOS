@@ -379,7 +379,6 @@ impl TursoClient {
         }
 
         Ok(Some(super::StoredTranscriptionWithSegments {
-            id: base.id,
             full_text: base.full_text,
             segments,
         }))

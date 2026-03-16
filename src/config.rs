@@ -79,6 +79,13 @@ pub struct QdrantConfig {
     pub collection_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct GoogleOAuthConfig {
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub redirect_uri: String,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -98,6 +105,7 @@ pub struct AppConfig {
     pub redis: RedisConfig,
     pub jina: JinaConfig,
     pub qdrant: QdrantConfig,
+    pub google_oauth: GoogleOAuthConfig,
 }
 
 impl AppConfig {
@@ -175,6 +183,12 @@ impl AppConfig {
                 api_key: env::var("QDRANT_API_KEY").ok(),
                 collection_name: env::var("QDRANT_COLLECTION")
                     .unwrap_or_else(|_| "meeting_transcripts".to_owned()),
+            },
+            google_oauth: GoogleOAuthConfig {
+                client_id: env::var("GOOGLE_CLIENT_ID").ok(),
+                client_secret: env::var("GOOGLE_CLIENT_SECRET").ok(),
+                redirect_uri: env::var("GOOGLE_REDIRECT_URI")
+                    .unwrap_or_else(|_| "http://localhost:8080/api/v1/calendar/google/callback".to_owned()),
             },
         }
     }

@@ -91,7 +91,6 @@ pub struct StoredTranscriptSegment {
 
 #[derive(Debug, Clone)]
 pub struct StoredTranscriptionWithSegments {
-    pub id: String,
     pub full_text: Option<String>,
     pub segments: Vec<StoredTranscriptSegment>,
 }

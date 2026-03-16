@@ -19,13 +19,14 @@ impl GroqClient {
         Self::from_config(&config.groq)
     }
 
-    pub fn http_client(&self) -> &Client {
-        &self.http
-    }
-
     pub fn from_config(config: &GroqConfig) -> Option<Self> {
+        let http = Client::builder()
+            .timeout(std::time::Duration::from_secs(600))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .build()
+            .ok()?;
         Some(Self {
-            http: Client::new(),
+            http,
             api_key: config.api_key.clone()?,
             base_url: config.api_base_url.trim_end_matches('/').to_owned(),
         })
@@ -46,16 +47,22 @@ impl GroqClient {
             .text("response_format", "verbose_json".to_owned())
             .text("timestamp_granularities[]", "segment".to_owned());
 
-        let response = self
+        let raw_response = self
             .http
             .post(format!("{}/openai/v1/audio/transcriptions", self.base_url))
             .bearer_auth(&self.api_key)
             .multipart(form)
             .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
             .await?;
+
+        if !raw_response.status().is_success() {
+            let status = raw_response.status();
+            let body = raw_response.text().await.unwrap_or_default();
+            tracing::error!(status = %status, body = %body, "Groq transcription API error");
+            anyhow::bail!("Groq transcription failed with {status}: {body}");
+        }
+
+        let response = raw_response.json::<Value>().await?;
 
         let text = response
             .get("text")
@@ -136,7 +143,7 @@ impl GroqClient {
             "additionalProperties": false
         });
 
-        let response = self
+        let raw_response = self
             .http
             .post(format!("{}/openai/v1/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
@@ -195,10 +202,16 @@ impl GroqClient {
                 }
             }))
             .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
             .await?;
+
+        if !raw_response.status().is_success() {
+            let status = raw_response.status();
+            let body = raw_response.text().await.unwrap_or_default();
+            tracing::error!(status = %status, body = %body, "Groq notes API error");
+            anyhow::bail!("Groq notes generation failed with {status}: {body}");
+        }
+
+        let response = raw_response.json::<Value>().await?;
 
         let content = response
             .get("choices")

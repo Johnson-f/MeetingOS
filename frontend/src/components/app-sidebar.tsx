@@ -3,7 +3,6 @@
 import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
-import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
@@ -15,17 +14,17 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { DashboardSquare01Icon, Video01Icon, Link04Icon, Calendar01Icon, Settings05Icon, CommandIcon } from "@hugeicons/core-free-icons"
+import { DashboardSquare01Icon, Video01Icon, Link04Icon, Calendar01Icon, CommandIcon } from "@hugeicons/core-free-icons"
 
 const data = {
   navMain: [
-    // {
-    //   title: "Dashboard",
-    //   url: "/dashboard",
-    //   icon: (
-    //     <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} />
-    //   ),
-    // },
+    {
+      title: "Dashboard",
+      url: "/dashboard",
+      icon: (
+        <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} />
+      ),
+    },
     {
       title: "Meetings",
       url: "/dashboard/meetings",
@@ -48,15 +47,6 @@ const data = {
       ),
     },
   ],
-  navSecondary: [
-    {
-      title: "Settings",
-      url: "/dashboard/settings",
-      icon: (
-        <HugeiconsIcon icon={Settings05Icon} strokeWidth={2} />
-      ),
-    },
-  ],
 }
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
@@ -76,7 +66,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
         <NavUser />

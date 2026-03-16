@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Extension, Path, Query, State},
-    http::{StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use clerk_rs::validators::authorizer::ClerkJwt;

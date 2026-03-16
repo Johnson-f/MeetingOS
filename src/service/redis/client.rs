@@ -64,31 +64,4 @@ impl RedisClient {
         conn.del::<_, ()>(key).await.context("redis DEL failed")?;
         Ok(())
     }
-
-    pub async fn set_json<T: serde::Serialize>(
-        &self,
-        key: &str,
-        value: &T,
-        ttl_seconds: u64,
-    ) -> Result<()> {
-        let json = serde_json::to_string(value).context("failed to serialize to JSON")?;
-        self.set(key, &json, ttl_seconds).await
-    }
-
-    pub async fn get_json<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        match self.get(key).await? {
-            Some(json) => {
-                let value =
-                    serde_json::from_str(&json).context("failed to deserialize JSON from Redis")?;
-                Ok(Some(value))
-            }
-            None => Ok(None),
-        }
-    }
-
-    pub async fn exists(&self, key: &str) -> Result<bool> {
-        let mut conn = self.conn.clone();
-        let exists: bool = conn.exists(key).await.context("redis EXISTS failed")?;
-        Ok(exists)
-    }
 }

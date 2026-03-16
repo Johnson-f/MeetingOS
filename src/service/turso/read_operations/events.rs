@@ -228,6 +228,18 @@ impl TursoClient {
         }))
     }
 
+    pub async fn recover_stale_leases(&self) -> Result<u64> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        let changed = conn
+            .execute(
+                "UPDATE jobs SET status = 'queued', leased_at = NULL, lease_owner = NULL, updated_at = ? WHERE status = 'leased'",
+                params![now.as_str()],
+            )
+            .await?;
+        Ok(changed)
+    }
+
     pub async fn complete_job(&self, job_id: &str) -> Result<()> {
         let conn = self.connection().await?;
         let now = now_rfc3339();

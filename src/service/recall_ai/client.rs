@@ -25,8 +25,13 @@ pub struct RecallAiClient {
 
 impl RecallAiClient {
     pub fn new(config: &RecallAiConfig) -> Option<Self> {
+        let http = Client::builder()
+            .timeout(std::time::Duration::from_secs(600))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .build()
+            .ok()?;
         Some(Self {
-            http: Client::new(),
+            http,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             api_key: config.api_key.clone()?,
             webhook_secret: config.webhook_secret.clone(),
@@ -53,6 +58,11 @@ impl RecallAiClient {
                 "metadata": payload.metadata,
                 "recording_config": {
                     "audio_mixed_mp3": {},
+                },
+                "automatic_leave": {
+                    "waiting_room_timeout": 300,
+                    "noone_joined_timeout": 300,
+                    "everyone_left_timeout": 5,
                 }
             }))
             .send()
