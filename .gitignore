@@ -2,3 +2,5 @@
 target/
 .env
 .env.production
+deploy.sh
+qdrant.sh
