@@ -353,6 +353,38 @@ impl TursoClient {
         })
     }
 
+    pub async fn get_transcription_with_segments(
+        &self,
+        transcription_id: &str,
+    ) -> Result<Option<super::StoredTranscriptionWithSegments>> {
+        let base = self.get_transcription(transcription_id).await?;
+        let Some(base) = base else { return Ok(None) };
+
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT text, start_ms, end_ms, speaker_label FROM transcript_segments WHERE transcription_id = ? ORDER BY seq ASC",
+                params![transcription_id],
+            )
+            .await?;
+
+        let mut segments = Vec::new();
+        while let Some(row) = rows.next().await? {
+            segments.push(super::StoredTranscriptSegment {
+                text: row.get::<String>(0)?,
+                start_ms: row.get::<i64>(1)?,
+                end_ms: row.get::<i64>(2)?,
+                speaker_label: row.get::<Option<String>>(3)?,
+            });
+        }
+
+        Ok(Some(super::StoredTranscriptionWithSegments {
+            id: base.id,
+            full_text: base.full_text,
+            segments,
+        }))
+    }
+
     pub async fn get_transcription(
         &self,
         transcription_id: &str,

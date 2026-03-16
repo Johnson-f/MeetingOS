@@ -1,5 +1,7 @@
 "use client"
 
+import { useUser, useClerk } from "@clerk/nextjs"
+import { useTheme } from "next-themes"
 import {
   Avatar,
   AvatarFallback,
@@ -21,18 +23,23 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { MoreVerticalCircle01Icon, UserCircle02Icon, CreditCardIcon, Notification03Icon, Logout01Icon } from "@hugeicons/core-free-icons"
+import { MoreVerticalCircle01Icon, UserCircle02Icon, CreditCardIcon, Notification03Icon, Logout01Icon, Sun01Icon, Moon01Icon } from "@hugeicons/core-free-icons"
 
-export function NavUser({
-  user,
-}: {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
-}) {
+export function NavUser() {
   const { isMobile } = useSidebar()
+  const { user } = useUser()
+  const { signOut } = useClerk()
+  const { theme, setTheme } = useTheme()
+
+  const name = user?.fullName ?? user?.firstName ?? "User"
+  const email = user?.primaryEmailAddress?.emailAddress ?? ""
+  const avatar = user?.imageUrl ?? ""
+  const initials = name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2)
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -42,14 +49,14 @@ export function NavUser({
               <SidebarMenuButton size="lg" className="aria-expanded:bg-muted" />
             }
           >
-            <Avatar className="size-8 rounded-lg grayscale">
-              <AvatarImage src={user.avatar} alt={user.name} />
-              <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+            <Avatar className="size-8 rounded-lg">
+              <AvatarImage src={avatar} alt={name} />
+              <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-medium">{user.name}</span>
+              <span className="truncate font-medium">{name}</span>
               <span className="truncate text-xs text-foreground/70">
-                {user.email}
+                {email}
               </span>
             </div>
             <HugeiconsIcon icon={MoreVerticalCircle01Icon} strokeWidth={2} className="ml-auto size-4" />
@@ -64,13 +71,13 @@ export function NavUser({
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                   <Avatar className="size-8">
-                    <AvatarImage src={user.avatar} alt={user.name} />
-                    <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+                    <AvatarImage src={avatar} alt={name} />
+                    <AvatarFallback className="rounded-lg">{initials}</AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">{user.name}</span>
+                    <span className="truncate font-medium">{name}</span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {user.email}
+                      {email}
                     </span>
                   </div>
                 </div>
@@ -90,9 +97,13 @@ export function NavUser({
                 <HugeiconsIcon icon={Notification03Icon} strokeWidth={2} />
                 Notifications
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+                <HugeiconsIcon icon={theme === "dark" ? Sun01Icon : Moon01Icon} strokeWidth={2} />
+                {theme === "dark" ? "Light mode" : "Dark mode"}
+              </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => signOut()}>
               <HugeiconsIcon icon={Logout01Icon} strokeWidth={2} />
               Log out
             </DropdownMenuItem>

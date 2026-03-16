@@ -1,7 +1,7 @@
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use clerk_rs::validators::axum::ClerkLayer;
 use clerk_rs::validators::jwks::MemoryCacheJwksProvider;
@@ -12,10 +12,12 @@ use tower_http::{
 
 use super::{
     analytics::analytics_overview,
+    events::sse_events,
     meetings::{
         cancel_meeting, create_meeting, delete_meeting, get_audio, get_meeting, get_note,
-        list_meetings, me,
+        list_meetings, me, update_meeting,
     },
+    search::chat_stream,
     public::{health, not_implemented, root, status},
     state::AppState,
     webhooks::recall_webhook,
@@ -28,6 +30,7 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/health", get(health))
         .route("/api/v1/status", get(status))
         .route("/api/v1/webhooks/recall", post(recall_webhook))
+        .route("/api/v1/events", get(sse_events))
         .route("/api/v1/webhooks/google-calendar", post(not_implemented))
         .route("/api/v1/webhooks/microsoft-graph", post(not_implemented));
 
@@ -35,9 +38,10 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/me", get(me))
         .route("/api/v1/analytics/overview", get(analytics_overview))
         .route("/api/v1/meetings", post(create_meeting).get(list_meetings))
+        .route("/api/v1/chat", post(chat_stream))
         .route(
             "/api/v1/meetings/{meeting_id}",
-            get(get_meeting).delete(delete_meeting),
+            get(get_meeting).patch(update_meeting).delete(delete_meeting),
         )
         .route("/api/v1/meetings/{meeting_id}/cancel", post(cancel_meeting))
         .route("/api/v1/meetings/{meeting_id}/audio", get(get_audio))
@@ -73,7 +77,7 @@ fn build_cors_layer(state: &AppState) -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([
             header::AUTHORIZATION,
             header::CONTENT_TYPE,

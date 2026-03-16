@@ -3,12 +3,30 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
-use crate::service::{ServiceRegistry, recall_ai::GroqClient};
+use crate::{routes::state::SseEvent, service::{ServiceRegistry, recall_ai::GroqClient}};
+
+use crate::service::vector::chunker::TranscriptSegment;
 
 use super::constants::{
     JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_STORE_RECORDING_AUDIO,
-    JOB_TRANSCRIBE_RECORDING,
+    JOB_TRANSCRIBE_RECORDING, JOB_VECTORIZE_TRANSCRIPT,
 };
+
+async fn broadcast(services: &ServiceRegistry, event_type: &str, meeting_id: Option<&str>) {
+    let _ = services.sse_tx.send(SseEvent {
+        event_type: event_type.to_owned(),
+        meeting_id: meeting_id.map(str::to_owned),
+    });
+
+    // Invalidate the meeting owner's cached data
+    if let Some(redis) = &services.redis {
+        if let Some(mid) = meeting_id {
+            if let Ok(Some(user_id)) = services.turso.get_meeting_owner(mid).await {
+                redis.invalidate_user_caches(&user_id).await;
+            }
+        }
+    }
+}
 
 pub(super) async fn process_recall_event_job(
     services: &ServiceRegistry,
@@ -36,6 +54,7 @@ pub(super) async fn process_recall_event_job(
             .turso
             .apply_recall_bot_event(event_type, &event_payload)
             .await?;
+        broadcast(services, "meeting_updated", None).await;
     }
 
     if event_type == "recording.done" {
@@ -317,12 +336,25 @@ pub(super) async fn transcribe_recording_job(
         )
         .await?;
 
-    info!(meeting_id = %recording.meeting_id, transcription_id = %transcription.id, "enqueuing note generation job");
+    broadcast(services, "meeting_updated", Some(&recording.meeting_id)).await;
+    info!(meeting_id = %recording.meeting_id, transcription_id = %transcription.id, "enqueuing note generation + vectorization jobs");
     services
         .turso
         .enqueue_job(
             JOB_GENERATE_NOTE,
             Some(&format!("generate-note-{}", transcription.id)),
+            &json!({
+                "meeting_id": recording.meeting_id,
+                "transcription_id": transcription.id,
+            }),
+        )
+        .await?;
+
+    services
+        .turso
+        .enqueue_job(
+            JOB_VECTORIZE_TRANSCRIPT,
+            Some(&format!("vectorize-{}", transcription.id)),
             &json!({
                 "meeting_id": recording.meeting_id,
                 "transcription_id": transcription.id,
@@ -371,5 +403,72 @@ pub(super) async fn generate_note_job(services: &ServiceRegistry, payload: &Valu
         )
         .await?;
 
+    broadcast(services, "meeting_updated", Some(meeting_id)).await;
+    Ok(())
+}
+
+pub(super) async fn vectorize_transcript_job(
+    services: &ServiceRegistry,
+    payload: &Value,
+) -> Result<()> {
+    let meeting_id = payload
+        .get("meeting_id")
+        .and_then(Value::as_str)
+        .context("missing meeting_id")?;
+    let transcription_id = payload
+        .get("transcription_id")
+        .and_then(Value::as_str)
+        .context("missing transcription_id")?;
+
+    info!(meeting_id = %meeting_id, transcription_id = %transcription_id, "vectorizing transcript");
+
+    let transcription = services
+        .turso
+        .get_transcription_with_segments(transcription_id)
+        .await?
+        .context("transcription not found")?;
+
+    let owner_id = services
+        .turso
+        .get_meeting_owner(meeting_id)
+        .await?
+        .unwrap_or_default();
+
+    // Fetch actual meeting title for chunk context
+    let meeting_title = if let Ok(Some(user_id)) = services.turso.get_meeting_owner(meeting_id).await {
+        services
+            .turso
+            .get_meeting_for_user(&user_id, meeting_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.title)
+            .unwrap_or_else(|| meeting_id.to_owned())
+    } else {
+        meeting_id.to_owned()
+    };
+
+    let segments: Vec<TranscriptSegment> = transcription
+        .segments
+        .into_iter()
+        .map(|s| TranscriptSegment {
+            text: s.text,
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            speaker_label: s.speaker_label,
+        })
+        .collect();
+
+    crate::service::vector::vectorize_transcript(
+        services,
+        meeting_id,
+        &owner_id,
+        &meeting_title,
+        segments,
+        transcription.full_text.as_deref(),
+    )
+    .await?;
+
+    info!(meeting_id = %meeting_id, "transcript vectorization complete");
     Ok(())
 }

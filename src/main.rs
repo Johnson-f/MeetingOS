@@ -21,13 +21,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     init_tracing();
 
+    // must be before any TLS connection — fixes rustls crypto provider conflict
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     let config = AppConfig::from_env();
     let turso = TursoClient::connect(
         config.turso_database_url.clone(),
         config.turso_auth_token.clone(),
     )
     .await?;
-    let services = ServiceRegistry::new(config.clone(), turso).await;
+    let (sse_tx, _) = tokio::sync::broadcast::channel(256);
+    let services = ServiceRegistry::new(config.clone(), turso, sse_tx.clone()).await;
 
     match config.role {
         AppRole::Api => run_api(config, services).await?,

@@ -59,6 +59,26 @@ pub struct WorkerConfig {
     pub max_attempts: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RedisConfig {
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JinaConfig {
+    pub api_key: Option<String>,
+    pub base_url: String,
+    pub embedding_model: String,
+    pub reranker_model: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct QdrantConfig {
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub collection_name: String,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -75,6 +95,9 @@ pub struct AppConfig {
     pub groq: GroqConfig,
     pub storage: StorageConfig,
     pub worker: WorkerConfig,
+    pub redis: RedisConfig,
+    pub jina: JinaConfig,
+    pub qdrant: QdrantConfig,
 }
 
 impl AppConfig {
@@ -134,6 +157,24 @@ impl AppConfig {
                     .ok()
                     .and_then(|value| value.parse().ok())
                     .unwrap_or(8),
+            },
+            redis: RedisConfig {
+                url: env::var("REDIS_URL").ok(),
+            },
+            jina: JinaConfig {
+                api_key: env::var("JINA_API_KEY").ok(),
+                base_url: env::var("JINA_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.jina.ai".to_owned()),
+                embedding_model: env::var("JINA_EMBEDDING_MODEL")
+                    .unwrap_or_else(|_| "jina-embeddings-v3".to_owned()),
+                reranker_model: env::var("JINA_RERANKER_MODEL")
+                    .unwrap_or_else(|_| "jina-reranker-v3".to_owned()),
+            },
+            qdrant: QdrantConfig {
+                url: env::var("QDRANT_URL").ok(),
+                api_key: env::var("QDRANT_API_KEY").ok(),
+                collection_name: env::var("QDRANT_COLLECTION")
+                    .unwrap_or_else(|_| "meeting_transcripts".to_owned()),
             },
         }
     }

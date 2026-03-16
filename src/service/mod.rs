@@ -1,13 +1,21 @@
 pub mod auth;
+pub mod jina;
 pub mod jobs;
+pub mod qdrant_search;
 pub mod recall_ai;
+pub mod redis;
 pub mod storage;
 pub mod turso;
+pub mod vector;
 
+use tokio::sync::broadcast;
 use tracing::info;
 
-use crate::config::AppConfig;
+use crate::{config::AppConfig, routes::state::SseEvent};
+use jina::JinaClient;
+use qdrant_search::QdrantClient;
 use recall_ai::RecallAiClient;
+use redis::RedisClient;
 use storage::StorageClient;
 use turso::client::TursoClient;
 
@@ -16,17 +24,27 @@ pub struct ServiceRegistry {
     pub turso: TursoClient,
     pub recall_ai: Option<RecallAiClient>,
     pub storage: Option<StorageClient>,
+    pub redis: Option<RedisClient>,
+    pub jina: Option<JinaClient>,
+    pub qdrant: Option<QdrantClient>,
     pub config: AppConfig,
+    pub sse_tx: broadcast::Sender<SseEvent>,
 }
 
 impl ServiceRegistry {
-    pub async fn new(config: AppConfig, turso: TursoClient) -> Self {
+    pub async fn new(config: AppConfig, turso: TursoClient, sse_tx: broadcast::Sender<SseEvent>) -> Self {
         let recall_ai = RecallAiClient::new(&config.recall_ai);
         let storage = StorageClient::new(&config.storage).await;
+        let redis = RedisClient::connect(&config.redis).await;
+        let jina = JinaClient::new(&config.jina);
+        let qdrant = QdrantClient::connect(&config.qdrant).await;
 
         info!(
             recall_ai = recall_ai.is_some(),
             storage = storage.is_some(),
+            redis = redis.is_some(),
+            jina = jina.is_some(),
+            qdrant = qdrant.is_some(),
             groq = config.groq.api_key.is_some(),
             "services initialized"
         );
@@ -35,7 +53,11 @@ impl ServiceRegistry {
             turso,
             recall_ai,
             storage,
+            redis,
+            jina,
+            qdrant,
             config,
+            sse_tx,
         }
     }
 

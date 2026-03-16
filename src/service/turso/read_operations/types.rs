@@ -81,6 +81,21 @@ pub struct StoredTranscription {
     pub full_text: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct StoredTranscriptSegment {
+    pub text: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub speaker_label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredTranscriptionWithSegments {
+    pub id: String,
+    pub full_text: Option<String>,
+    pub segments: Vec<StoredTranscriptSegment>,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RecordingRow {

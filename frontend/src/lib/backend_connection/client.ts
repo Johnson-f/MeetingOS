@@ -7,7 +7,9 @@ import type {
   MeetingResponse,
   MeetingsListResponse,
   NoteResponse,
+  SearchResponse,
   ServiceStatusResponse,
+  UpdateMeetingPayload,
 } from "@/lib/types";
 
 export class BackendApiError extends Error {
@@ -114,6 +116,13 @@ export class BackendClient {
     });
   }
 
+  updateMeeting(meetingId: string, payload: UpdateMeetingPayload) {
+    return this.request<MeetingResponse>(`/api/v1/meetings/${meetingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
   getMeeting(meetingId: string) {
     return this.request<MeetingResponse>(`/api/v1/meetings/${meetingId}`);
   }
@@ -135,6 +144,17 @@ export class BackendClient {
     return this.request<void>(`/api/v1/meetings/${meetingId}`, {
       method: "DELETE",
     });
+  }
+
+  searchMeetings(query: string, meetingId?: string) {
+    return this.request<SearchResponse>("/api/v1/meetings/search", {
+      method: "POST",
+      body: JSON.stringify({ query, meeting_id: meetingId }),
+    });
+  }
+
+  getAudioUrl(meetingId: string) {
+    return this.request<{ url: string }>(`/api/v1/meetings/${meetingId}/audio`);
   }
 
   async fetchMeetingAudioBlob(meetingId: string) {

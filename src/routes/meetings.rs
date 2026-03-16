@@ -12,7 +12,7 @@ use tracing::info;
 use crate::{
     models::{
         ApiError, CreateMeetingRequest, CurrentUserResponse, MeetingActionResponse,
-        MeetingMutationResponse, MeetingsListQuery,
+        MeetingMutationResponse, MeetingsListQuery, UpdateMeetingRequest,
     },
     service::{
         recall_ai::{
@@ -162,6 +162,11 @@ pub async fn create_meeting(
         .await?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))?;
 
+    // Invalidate cache
+    if let Some(redis) = &state.services.redis {
+        redis.invalidate_user_caches(&user.user_id).await;
+    }
+
     Ok((
         if result.created {
             StatusCode::CREATED
@@ -175,6 +180,48 @@ pub async fn create_meeting(
     ))
 }
 
+pub async fn update_meeting(
+    State(state): State<AppState>,
+    Extension(jwt): Extension<ClerkJwt>,
+    Path(meeting_id): Path<String>,
+    Json(payload): Json<UpdateMeetingRequest>,
+) -> Result<Json<Value>, ApiError> {
+    info!(sub = %jwt.sub, meeting_id = %meeting_id, "PATCH /api/v1/meetings/{{id}}");
+    let user = current_user(&state, &jwt).await?;
+
+    // Verify access
+    state
+        .services
+        .turso
+        .get_meeting_for_user(&user.user_id, &meeting_id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))?;
+
+    state
+        .services
+        .turso
+        .update_meeting_fields(
+            &meeting_id,
+            payload.title.as_deref(),
+            payload.scheduled_start_at.as_deref(),
+        )
+        .await?;
+
+    let detail = state
+        .services
+        .turso
+        .get_meeting_for_user(&user.user_id, &meeting_id)
+        .await?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))?;
+
+    // Invalidate cache
+    if let Some(redis) = &state.services.redis {
+        redis.invalidate_user_caches(&user.user_id).await;
+    }
+
+    Ok(Json(json!({ "meeting": detail })))
+}
+
 pub async fn list_meetings(
     State(state): State<AppState>,
     Extension(jwt): Extension<ClerkJwt>,
@@ -184,17 +231,35 @@ pub async fn list_meetings(
     let user = current_user(&state, &jwt).await?;
     let limit = query.limit.unwrap_or(25).min(100);
     let offset = query.offset.unwrap_or(0);
+
+    // Try Redis cache first
+    if let Some(redis) = &state.services.redis {
+        if let Ok(Some(cached)) = redis.get_cached_meetings(&user.user_id, limit, offset).await {
+            info!(sub = %jwt.sub, "cache hit: meetings list");
+            if let Ok(value) = serde_json::from_str::<Value>(&cached) {
+                return Ok(Json(value));
+            }
+        }
+    }
+
     let meetings = state
         .services
         .turso
         .list_meetings_for_user(&user.user_id, limit, offset)
         .await?;
 
-    Ok(Json(json!({
+    let response = json!({
         "items": meetings,
         "limit": limit,
         "offset": offset,
-    })))
+    });
+
+    // Write to cache
+    if let Some(redis) = &state.services.redis {
+        let _ = redis.set_cached_meetings(&user.user_id, limit, offset, &response.to_string()).await;
+    }
+
+    Ok(Json(response))
 }
 
 pub async fn get_meeting(
@@ -204,13 +269,34 @@ pub async fn get_meeting(
 ) -> Result<Json<Value>, ApiError> {
     info!(sub = %jwt.sub, meeting_id = %meeting_id, "GET /api/v1/meetings/{{id}}");
     let user = current_user(&state, &jwt).await?;
+
+    // Try Redis cache for transcript (meeting detail with completed transcription)
+    if let Some(redis) = &state.services.redis {
+        if let Ok(Some(cached)) = redis.get_cached_transcript(&meeting_id).await {
+            info!(meeting_id = %meeting_id, "cache hit: meeting detail");
+            if let Ok(value) = serde_json::from_str::<Value>(&cached) {
+                return Ok(Json(value));
+            }
+        }
+    }
+
     let meeting = state
         .services
         .turso
         .get_meeting_for_user(&user.user_id, &meeting_id)
         .await?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))?;
-    Ok(Json(json!({ "meeting": meeting })))
+
+    let response = json!({ "meeting": meeting });
+
+    // Cache if meeting is completed (transcript won't change)
+    if meeting.status == "completed" {
+        if let Some(redis) = &state.services.redis {
+            let _ = redis.set_cached_transcript(&meeting_id, &response.to_string()).await;
+        }
+    }
+
+    Ok(Json(response))
 }
 
 pub async fn get_note(
@@ -220,13 +306,34 @@ pub async fn get_note(
 ) -> Result<Json<Value>, ApiError> {
     info!(sub = %jwt.sub, meeting_id = %meeting_id, "GET /api/v1/notes/{{id}}");
     let user = current_user(&state, &jwt).await?;
+
+    // Try Redis cache first
+    if let Some(redis) = &state.services.redis {
+        if let Ok(Some(cached)) = redis.get_cached_note(&meeting_id).await {
+            info!(meeting_id = %meeting_id, "cache hit: note");
+            if let Ok(value) = serde_json::from_str::<Value>(&cached) {
+                return Ok(Json(value));
+            }
+        }
+    }
+
     let meeting = state
         .services
         .turso
         .get_meeting_for_user(&user.user_id, &meeting_id)
         .await?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))?;
-    Ok(Json(json!({ "note": meeting.note })))
+
+    let response = json!({ "note": meeting.note });
+
+    // Cache if note exists and is ready
+    if meeting.note.is_some() {
+        if let Some(redis) = &state.services.redis {
+            let _ = redis.set_cached_note(&meeting_id, &response.to_string()).await;
+        }
+    }
+
+    Ok(Json(response))
 }
 
 pub async fn cancel_meeting(
@@ -281,6 +388,11 @@ pub async fn cancel_meeting(
         .update_meeting_status(&meeting_id, "cancelled", Some("cancelled"))
         .await?;
 
+    // Invalidate cache
+    if let Some(redis) = &state.services.redis {
+        redis.invalidate_user_caches(&user.user_id).await;
+    }
+
     Ok(Json(MeetingActionResponse {
         meeting_id,
         status: "cancelled".to_owned(),
@@ -302,6 +414,10 @@ pub async fn delete_meeting(
         .await?;
 
     if deleted {
+        // Invalidate cache
+        if let Some(redis) = &state.services.redis {
+            redis.invalidate_user_caches(&user.user_id).await;
+        }
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::new(StatusCode::NOT_FOUND, "meeting not found"))
@@ -315,6 +431,15 @@ pub async fn get_audio(
 ) -> Result<Response, ApiError> {
     info!(sub = %jwt.sub, meeting_id = %meeting_id, "GET /api/v1/meetings/{{id}}/audio");
     let user = current_user(&state, &jwt).await?;
+
+    // Try Redis cache first
+    if let Some(redis) = &state.services.redis {
+        if let Ok(Some(cached_url)) = redis.get_cached_audio_url(&meeting_id).await {
+            info!(meeting_id = %meeting_id, "cache hit: audio URL");
+            return Ok(Json(json!({ "url": cached_url })).into_response());
+        }
+    }
+
     state
         .services
         .turso
@@ -326,8 +451,24 @@ pub async fn get_audio(
         .services
         .turso
         .get_audio_asset_for_meeting(&meeting_id)
-        .await?
+        .await?;
+
+    info!(
+        meeting_id = %meeting_id,
+        asset_found = asset.is_some(),
+        "audio asset lookup"
+    );
+
+    let asset = asset
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "meeting has no stored audio asset"))?;
+
+    info!(
+        meeting_id = %meeting_id,
+        status = ?asset.status,
+        bucket = ?asset.storage_bucket,
+        key = ?asset.storage_key,
+        "audio asset details"
+    );
 
     if !matches!(asset.status.as_deref(), Some("stored"))
         || asset.storage_bucket.is_none()
@@ -342,6 +483,9 @@ pub async fn get_audio(
     let storage = state.services.storage.as_ref().ok_or_else(|| {
         ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "storage is not configured")
     })?;
+
+    info!(meeting_id = %meeting_id, key = %asset.storage_key.as_deref().unwrap_or(""), "generating presigned URL");
+
     let playback_url = storage
         .presign_audio_get(
             asset.storage_key.as_deref().unwrap_or_default(),
@@ -355,12 +499,12 @@ pub async fn get_audio(
             )
         })?;
 
-    Ok((
-        StatusCode::FOUND,
-        [
-            (header::LOCATION, playback_url),
-            (header::CACHE_CONTROL, "no-store".to_owned()),
-        ],
-    )
-        .into_response())
+    info!(meeting_id = %meeting_id, "presigned URL generated");
+
+    // Cache the presigned URL
+    if let Some(redis) = &state.services.redis {
+        let _ = redis.set_cached_audio_url(&meeting_id, &playback_url).await;
+    }
+
+    Ok(Json(json!({ "url": playback_url })).into_response())
 }

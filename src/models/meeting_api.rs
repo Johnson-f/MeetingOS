@@ -44,6 +44,13 @@ pub struct MeetingMutationResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateMeetingRequest {
+    pub title: Option<String>,
+    pub scheduled_start_at: Option<String>,
+    pub bot_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingActionResponse {
     pub meeting_id: String,
     pub status: String,

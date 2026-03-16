@@ -38,12 +38,45 @@ export function NewMeetingDialog({
     setBotName("")
     setScheduleLater(false)
     setJoinAt("")
+    setUrlError("")
+  }
+
+  const [urlError, setUrlError] = React.useState("")
+
+  function validateMeetingUrl(url: string): string | null {
+    const trimmed = url.trim()
+    if (!trimmed) return "Meeting URL is required"
+    try {
+      const parsed = new URL(trimmed)
+      const host = parsed.hostname.toLowerCase()
+      const supported = [
+        "meet.google.com",
+        "zoom.us",
+        "us02web.zoom.us",
+        "us04web.zoom.us",
+        "us05web.zoom.us",
+        "us06web.zoom.us",
+        "teams.microsoft.com",
+        "teams.live.com",
+      ]
+      if (!supported.some((h) => host === h || host.endsWith(`.${h}`))) {
+        return "Only Google Meet, Zoom, and Microsoft Teams links are supported"
+      }
+      return null
+    } catch {
+      return "Please enter a valid URL"
+    }
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
 
-    if (!meetingUrl.trim()) return
+    const error = validateMeetingUrl(meetingUrl)
+    if (error) {
+      setUrlError(error)
+      return
+    }
+    setUrlError("")
 
     const meetingTimeMode: MeetingTimeMode = scheduleLater
       ? "future"
@@ -91,9 +124,16 @@ export function NewMeetingDialog({
               id="meeting-url"
               placeholder="Paste meeting link (Zoom, Google Meet, etc.)"
               value={meetingUrl}
-              onChange={(e) => setMeetingUrl(e.target.value)}
+              onChange={(e) => {
+                setMeetingUrl(e.target.value)
+                if (urlError) setUrlError("")
+              }}
+              aria-invalid={!!urlError}
               required
             />
+            {urlError && (
+              <p className="text-xs text-destructive">{urlError}</p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="title">Title (optional)</Label>

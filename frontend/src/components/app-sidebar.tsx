@@ -18,11 +18,6 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { DashboardSquare01Icon, Video01Icon, Link04Icon, Calendar01Icon, Settings05Icon, CommandIcon } from "@hugeicons/core-free-icons"
 
 const data = {
-  user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
-  },
   navMain: [
     // {
     //   title: "Dashboard",
@@ -33,21 +28,21 @@ const data = {
     // },
     {
       title: "Meetings",
-      url: "/meetings",
+      url: "/dashboard/meetings",
       icon: (
         <HugeiconsIcon icon={Video01Icon} strokeWidth={2} />
       ),
     },
     {
       title: "Integration",
-      url: "/integration",
+      url: "/dashboard/integrations",
       icon: (
         <HugeiconsIcon icon={Link04Icon} strokeWidth={2} />
       ),
     },
     {
       title: "Schedule",
-      url: "/schedule",
+      url: "/dashboard/schedule",
       icon: (
         <HugeiconsIcon icon={Calendar01Icon} strokeWidth={2} />
       ),
@@ -56,7 +51,7 @@ const data = {
   navSecondary: [
     {
       title: "Settings",
-      url: "/settings",
+      url: "/dashboard/settings",
       icon: (
         <HugeiconsIcon icon={Settings05Icon} strokeWidth={2} />
       ),
@@ -84,7 +79,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <NavUser />
       </SidebarFooter>
     </Sidebar>
   )

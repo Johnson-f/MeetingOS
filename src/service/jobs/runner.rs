@@ -9,11 +9,11 @@ use crate::service::ServiceRegistry;
 use super::{
     constants::{
         JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_PROCESS_RECALL_EVENT,
-        JOB_STORE_RECORDING_AUDIO, JOB_TRANSCRIBE_RECORDING,
+        JOB_STORE_RECORDING_AUDIO, JOB_TRANSCRIBE_RECORDING, JOB_VECTORIZE_TRANSCRIPT,
     },
     handlers::{
         fetch_recording_media_job, generate_note_job, process_recall_event_job,
-        store_recording_audio_job, transcribe_recording_job,
+        store_recording_audio_job, transcribe_recording_job, vectorize_transcript_job,
     },
 };
 
@@ -72,6 +72,7 @@ async fn process_job(services: &ServiceRegistry, payload_json: &str, job_type: &
         JOB_STORE_RECORDING_AUDIO => store_recording_audio_job(services, &payload).await,
         JOB_TRANSCRIBE_RECORDING => transcribe_recording_job(services, &payload).await,
         JOB_GENERATE_NOTE => generate_note_job(services, &payload).await,
+        JOB_VECTORIZE_TRANSCRIPT => vectorize_transcript_job(services, &payload).await,
         _ => {
             info!(%job_type, "ignoring unknown job type");
             Ok(())

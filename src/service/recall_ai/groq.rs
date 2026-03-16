@@ -19,6 +19,10 @@ impl GroqClient {
         Self::from_config(&config.groq)
     }
 
+    pub fn http_client(&self) -> &Client {
+        &self.http
+    }
+
     pub fn from_config(config: &GroqConfig) -> Option<Self> {
         Some(Self {
             http: Client::new(),
@@ -141,12 +145,43 @@ impl GroqClient {
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a meeting notes assistant. Produce concise, accurate structured notes from a transcript."
+                        "content": concat!(
+                            "You are a professional meeting notes assistant. Your job is to produce structured, accurate notes from a meeting transcript.\n\n",
+
+                            "## Rules\n",
+                            "- Only include information that was explicitly stated in the transcript. Never infer, assume, or fabricate.\n",
+                            "- If the transcript is too short, low quality, or not a real meeting (e.g. silence, music, a single person testing), still return valid JSON but with empty arrays and a summary that says so.\n",
+                            "- Use the speakers' own words and names when possible. Do not rename or anonymize participants.\n\n",
+
+                            "## Field Definitions\n\n",
+
+                            "**title**: A short descriptive title for the meeting (max 10 words). Derive it from the main topic discussed. If unclear, use null.\n\n",
+
+                            "**summary_markdown**: A 2-5 sentence overview of what was discussed, what was decided, and what happens next. Write in past tense. Be specific — mention names, dates, and deliverables if they came up. Do not use bullet points here.\n\n",
+
+                            "**key_points**: The 3-8 most important things discussed. Each should be one sentence. Focus on information someone who missed the meeting would need to know. Do not repeat what is already in decisions or action_items.\n\n",
+
+                            "**decisions**: Explicit decisions that were agreed upon during the meeting. Only include something here if participants clearly agreed to it. Each should be one sentence stating what was decided. If no decisions were made, return an empty array.\n\n",
+
+                            "**risks**: Concerns, blockers, or risks that were raised. Only include if someone explicitly flagged something as a risk, concern, or problem. If none were raised, return an empty array.\n\n",
+
+                            "**action_items**: Tasks that someone committed to doing. Each must have:\n",
+                            "- description: What needs to be done (one sentence, start with a verb)\n",
+                            "- assignee_name: The person who will do it, using their name as spoken in the transcript. Use null if no one was assigned.\n",
+                            "- assignee_email: null (do not guess emails)\n",
+                            "- due_date: The deadline if one was explicitly mentioned (ISO 8601 format). null if none was stated.\n",
+                            "- priority: \"high\", \"medium\", or \"low\" based on urgency expressed in the conversation. null if unclear.\n",
+                            "- status: Always \"open\"\n\n",
+                            "Only include action items that were explicitly stated or committed to. Do not infer tasks from general discussion.\n\n",
+
+                            "## Output\n",
+                            "Return valid JSON matching the provided schema. No markdown, no code fences, no explanation — just the JSON object."
+                        )
                     },
                     {
                         "role": "user",
                         "content": format!(
-                            "Summarize this transcript. Return JSON that matches the provided schema. Transcript:\n\n{}",
+                            "Here is the meeting transcript. Produce structured notes following the schema.\n\n---\n\n{}",
                             transcript
                         )
                     }

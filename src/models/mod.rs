@@ -9,7 +9,7 @@ pub use errors::ApiError;
 #[allow(unused_imports)]
 pub use meeting_api::{
     CreateMeetingRequest, CurrentUserResponse, MeetingActionResponse, MeetingMutationResponse,
-    MeetingTimeMode, MeetingsListQuery, RecallWebhookAck,
+    MeetingTimeMode, MeetingsListQuery, RecallWebhookAck, UpdateMeetingRequest,
 };
 pub use meeting_views::{
     ActionItemView, MeetingDetail, MeetingListItem, NoteView, RecallBotView, RecordingView,

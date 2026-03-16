@@ -206,6 +206,23 @@ impl TursoClient {
         Ok(Some(detail))
     }
 
+    pub async fn update_meeting_fields(
+        &self,
+        meeting_id: &str,
+        title: Option<&str>,
+        scheduled_start_at: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self.connection().await?;
+        let updated_at = now_rfc3339();
+        let changed = conn
+            .execute(
+                "UPDATE meetings SET title = COALESCE(?, title), scheduled_start_at = COALESCE(?, scheduled_start_at), updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+                (title, scheduled_start_at, updated_at.as_str(), meeting_id),
+            )
+            .await?;
+        Ok(changed > 0)
+    }
+
     pub async fn update_meeting_status(
         &self,
         meeting_id: &str,
@@ -248,6 +265,16 @@ impl TursoClient {
         .await?;
 
         Ok(true)
+    }
+
+    pub async fn get_meeting_owner(&self, meeting_id: &str) -> Result<Option<String>> {
+        let conn = self.connection().await?;
+        query_optional_string(
+            &conn,
+            "SELECT created_by_user_id FROM meetings WHERE id = ? LIMIT 1",
+            params![meeting_id],
+        )
+        .await
     }
 
     pub(crate) async fn attach_meeting_access(

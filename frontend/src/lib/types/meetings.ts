@@ -127,6 +127,12 @@ export interface CreateMeetingPayload {
   bot_name?: string;
 }
 
+export interface UpdateMeetingPayload {
+  title?: string;
+  scheduled_start_at?: string;
+  bot_name?: string;
+}
+
 export interface MeetingMutationResponse {
   meeting: MeetingDetail;
   created: boolean;
@@ -144,4 +150,19 @@ export interface MeetingResponse {
 
 export interface NoteResponse {
   note: NoteView | null;
+}
+
+export interface SearchSource {
+  meeting_id: string;
+  meeting_title: string;
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  speaker_label: string | null;
+  relevance_score: number;
+}
+
+export interface SearchResponse {
+  answer: string;
+  sources: SearchSource[];
 }
