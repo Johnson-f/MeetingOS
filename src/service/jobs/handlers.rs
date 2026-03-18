@@ -591,9 +591,9 @@ pub(super) async fn schedule_meeting_bots_job(
     // (status = "draft", source = "google_calendar", scheduled_start_at within 12 min)
     let conn = services.turso.connection().await?;
     let now = chrono::Utc::now();
-    let threshold = (now + chrono::Duration::minutes(12)).to_rfc3339();
+    let threshold = (now + chrono::Duration::minutes(5)).to_rfc3339();
 
-    info!(now = %now.to_rfc3339(), threshold = %threshold, "checking for draft calendar meetings starting within 12 minutes");
+    info!(now = %now.to_rfc3339(), threshold = %threshold, "checking for draft calendar meetings starting within 5 minutes");
 
     let mut rows = conn
         .query(
@@ -620,10 +620,10 @@ pub(super) async fn schedule_meeting_bots_job(
         let user_id = row.get::<String>(3)?;
         let workspace_id = row.get::<String>(4)?;
 
-        // Calculate join_at (10 min before start)
+        // Calculate join_at (3 min before start)
         let join_at = if let Some(ref start) = scheduled_start {
             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start) {
-                let join = dt - chrono::Duration::minutes(10);
+                let join = dt - chrono::Duration::minutes(3);
                 if join.with_timezone(&chrono::Utc) < now {
                     now.to_rfc3339()
                 } else {

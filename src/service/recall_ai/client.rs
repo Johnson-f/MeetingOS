@@ -60,9 +60,9 @@ impl RecallAiClient {
                     "audio_mixed_mp3": {},
                 },
                 "automatic_leave": {
-                    "waiting_room_timeout": 1200,
-                    "noone_joined_timeout": 1200,
-                    "everyone_left_timeout": 5,
+                    "waiting_room_timeout": 300,
+                    "noone_joined_timeout": 300,
+                    "everyone_left_timeout": 40,
                 }
             }))
             .send()

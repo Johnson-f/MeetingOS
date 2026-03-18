@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use sha2::{Digest, Sha256};
 
-const RECALL_JOIN_LEAD_MINUTES: i64 = 10;
+const RECALL_JOIN_LEAD_MINUTES: i64 = 3;
 const IMMEDIATE_DEDUP_BUCKET_MINUTES: i64 = 15;
 const MAX_PAST_MEETING_AGE_HOURS: i64 = 4;
 
