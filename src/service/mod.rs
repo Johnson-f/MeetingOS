@@ -29,6 +29,7 @@ pub struct ServiceRegistry {
     pub redis: Option<RedisClient>,
     pub jina: Option<JinaClient>,
     pub qdrant: Option<QdrantClient>,
+    pub qdrant_chat: Option<QdrantClient>,
     pub google_calendar: Option<GoogleCalendarClient>,
     pub config: AppConfig,
     pub sse_tx: broadcast::Sender<SseEvent>,
@@ -45,6 +46,14 @@ impl ServiceRegistry {
         let redis = RedisClient::connect(&config.redis).await;
         let jina = JinaClient::new(&config.jina);
         let qdrant = QdrantClient::connect(&config.qdrant).await;
+        // Chat collection uses same Qdrant server, different collection
+        let chat_qdrant_config = crate::config::QdrantConfig {
+            url: config.qdrant.url.clone(),
+            api_key: config.qdrant.api_key.clone(),
+            collection_name: config.qdrant.chat_collection_name.clone(),
+            chat_collection_name: config.qdrant.chat_collection_name.clone(),
+        };
+        let qdrant_chat = QdrantClient::connect(&chat_qdrant_config).await;
         let google_calendar = GoogleCalendarClient::new(&config.google_oauth);
 
         info!(
@@ -53,6 +62,7 @@ impl ServiceRegistry {
             redis = redis.is_some(),
             jina = jina.is_some(),
             qdrant = qdrant.is_some(),
+            qdrant_chat = qdrant_chat.is_some(),
             google_calendar = google_calendar.is_some(),
             groq = config.groq.api_key.is_some(),
             "services initialized"
@@ -65,6 +75,7 @@ impl ServiceRegistry {
             redis,
             jina,
             qdrant,
+            qdrant_chat,
             google_calendar,
             config,
             sse_tx,

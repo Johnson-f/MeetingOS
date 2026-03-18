@@ -77,6 +77,7 @@ pub struct QdrantConfig {
     pub url: Option<String>,
     pub api_key: Option<String>,
     pub collection_name: String,
+    pub chat_collection_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -183,6 +184,8 @@ impl AppConfig {
                 api_key: env::var("QDRANT_API_KEY").ok(),
                 collection_name: env::var("QDRANT_COLLECTION")
                     .unwrap_or_else(|_| "meeting_transcripts".to_owned()),
+                chat_collection_name: env::var("QDRANT_CHAT_COLLECTION")
+                    .unwrap_or_else(|_| "chat_conversations".to_owned()),
             },
             google_oauth: GoogleOAuthConfig {
                 client_id: env::var("GOOGLE_CLIENT_ID").ok(),
