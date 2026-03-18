@@ -53,7 +53,7 @@ impl ServiceRegistry {
             collection_name: config.qdrant.chat_collection_name.clone(),
             chat_collection_name: config.qdrant.chat_collection_name.clone(),
         };
-        let qdrant_chat = QdrantClient::connect(&chat_qdrant_config).await;
+        let qdrant_chat = QdrantClient::connect_for_chat(&chat_qdrant_config).await;
         let google_calendar = GoogleCalendarClient::new(&config.google_oauth);
 
         info!(

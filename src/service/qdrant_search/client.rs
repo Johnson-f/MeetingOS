@@ -62,6 +62,14 @@ pub struct ChatQAPoint {
 
 impl QdrantClient {
     pub async fn connect(config: &QdrantConfig) -> Option<Self> {
+        Self::connect_with_indexes(config, &["user_id", "meeting_id", "source_type"]).await
+    }
+
+    pub async fn connect_for_chat(config: &QdrantConfig) -> Option<Self> {
+        Self::connect_with_indexes(config, &["user_id", "thread_id", "source_type"]).await
+    }
+
+    async fn connect_with_indexes(config: &QdrantConfig, index_fields: &[&str]) -> Option<Self> {
         let url = config.url.as_deref()?;
 
         let mut builder = Qdrant::from_url(url).skip_compatibility_check();
@@ -76,7 +84,7 @@ impl QdrantClient {
                     client,
                     collection_name: config.collection_name.clone(),
                 };
-                if let Err(e) = qdrant.ensure_collection().await {
+                if let Err(e) = qdrant.ensure_collection(index_fields).await {
                     warn!(error = %e, "failed to ensure Qdrant collection");
                     return None;
                 }
@@ -89,7 +97,7 @@ impl QdrantClient {
         }
     }
 
-    async fn ensure_collection(&self) -> Result<()> {
+    async fn ensure_collection(&self, index_fields: &[&str]) -> Result<()> {
         let collections = self.client.list_collections().await?;
         let exists = collections
             .collections
@@ -98,7 +106,7 @@ impl QdrantClient {
 
         if exists {
             info!(collection = %self.collection_name, "Qdrant collection exists");
-            self.ensure_indexes().await?;
+            self.ensure_indexes(index_fields).await?;
             return Ok(());
         }
 
@@ -121,19 +129,19 @@ impl QdrantClient {
             .await
             .context("failed to create Qdrant collection")?;
 
-        self.ensure_indexes().await?;
+        self.ensure_indexes(index_fields).await?;
 
         info!(collection = %self.collection_name, "created Qdrant collection with indexes");
         Ok(())
     }
 
-    async fn ensure_indexes(&self) -> Result<()> {
-        for field in ["user_id", "meeting_id", "source_type"] {
+    async fn ensure_indexes(&self, fields: &[&str]) -> Result<()> {
+        for field in fields {
             let result = self
                 .client
                 .create_field_index(CreateFieldIndexCollectionBuilder::new(
                     &self.collection_name,
-                    field,
+                    *field,
                     FieldType::Keyword,
                 ))
                 .await;
