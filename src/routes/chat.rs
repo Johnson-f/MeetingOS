@@ -346,37 +346,62 @@ pub async fn chat_stream(
         })
         .collect();
 
-    let context_chunks: String = top_results
+    let transcript_context: String = top_results
         .iter()
         .enumerate()
+        .filter(|(_, (result, _))| result.source_type != "chat")
         .map(|(i, (result, _))| {
-            if result.source_type == "chat" {
-                format!("[Source {}] (Past conversation)\n{}", i + 1, result.text)
+            let speaker = result.speaker_label.as_deref().unwrap_or("Unknown");
+            let timestamp = format_ms(result.start_ms.unwrap_or(0));
+            let meeting_id_str = result.meeting_id.clone().unwrap_or_default();
+            let meeting_title = result.meeting_title.clone().unwrap_or_default();
+            let title = if meeting_title.is_empty() {
+                &meeting_id_str
             } else {
-                let speaker = result.speaker_label.as_deref().unwrap_or("Unknown");
-                let timestamp = format_ms(result.start_ms.unwrap_or(0));
-                let meeting_id_str = result.meeting_id.clone().unwrap_or_default();
-                let meeting_title = result.meeting_title.clone().unwrap_or_default();
-                let title = if meeting_title.is_empty() {
-                    &meeting_id_str
-                } else {
-                    &meeting_title
-                };
-                format!(
-                    "[Source {}] (Meeting: {}, Speaker: {}, Time: {})\n{}",
-                    i + 1,
-                    title,
-                    speaker,
-                    timestamp,
-                    result.text
-                )
-            }
+                &meeting_title
+            };
+            format!(
+                "[Source {}] (Meeting: {}, Speaker: {}, Time: {})\n{}",
+                i + 1,
+                title,
+                speaker,
+                timestamp,
+                result.text
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let chat_context: String = top_results
+        .iter()
+        .enumerate()
+        .filter(|(_, (result, _))| result.source_type == "chat")
+        .map(|(i, (result, _))| {
+            let thread = result.thread_id.as_deref().unwrap_or("unknown");
+            let date = result.created_at.as_deref().unwrap_or("unknown");
+            format!(
+                "[Source {}] (Previous conversation, thread: {}, date: {})\n{}",
+                i + 1,
+                thread,
+                date,
+                result.text
+            )
         })
         .collect::<Vec<_>>()
         .join("\n\n");
 
     // 7. Build messages array with conversation history
-    let system_prompt = "You are a meeting Q&A assistant. Answer questions based on meeting transcript excerpts and relevant past conversations provided below.\n\nRules:\n- Only use information explicitly present in the sources. Never make up information.\n- Reference which source number (e.g. [Source 1]) supports your answer.\n- If the answer is not in the provided sources, say: \"I couldn't find information about that in the meeting transcripts.\"\n- Be concise and direct. 2-4 sentences unless the question requires more detail.\n- If a speaker is identified, mention them by name.\n- Sources marked as \"Past conversation\" are from your previous chats with this user. You may reference them but prioritize meeting transcript sources.";
+    let system_prompt = "You are a meeting Q&A assistant. You have access to two types of sources:\n\n\
+1. **Meeting Transcripts** — Excerpts from the user's recorded meetings.\n\
+2. **Previous Conversations** — Past Q&A exchanges between you and this user.\n\n\
+Rules:\n\
+- Only use information explicitly present in the sources. Never make up information.\n\
+- Reference which source number (e.g. [Source 1]) supports your answer.\n\
+- Prioritize meeting transcript sources for factual meeting content.\n\
+- Use previous conversation sources when the user asks about past discussions or to build on prior answers.\n\
+- If the answer is not in any provided source, say: \"I couldn't find information about that in your meetings or our past conversations.\"\n\
+- Be concise and direct. 2-4 sentences unless the question requires more detail.\n\
+- If a speaker is identified, mention them by name.";
 
     let mut messages_array: Vec<Value> = Vec::new();
     messages_array.push(json!({
@@ -400,9 +425,18 @@ pub async fn chat_stream(
     }
 
     // Add the final user message with search context
+    let mut context_parts = Vec::new();
+    if !transcript_context.is_empty() {
+        context_parts.push(format!("## Meeting Transcript Excerpts\n\n{}", transcript_context));
+    }
+    if !chat_context.is_empty() {
+        context_parts.push(format!("## Previous Conversations\n\n{}", chat_context));
+    }
+    let full_context = context_parts.join("\n\n---\n\n");
+
     messages_array.push(json!({
         "role": "user",
-        "content": format!("## Meeting Transcript Excerpts\n\n{}\n\n## Question\n\n{}", context_chunks, query)
+        "content": format!("{}\n\n## Question\n\n{}", full_context, query)
     }));
 
     // 8. Stream from Groq in background task
