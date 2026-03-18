@@ -8,3 +8,4 @@ pub const JOB_SYNC_GOOGLE_CALENDAR: &str = "sync_google_calendar";
 pub const JOB_SCHEDULE_MEETING_BOTS: &str = "schedule_meeting_bots";
 pub const JOB_VECTORIZE_CHAT_QA: &str = "vectorize_chat_qa";
 pub const JOB_MIGRATE_CHAT_VECTORS: &str = "migrate_chat_vectors";
+pub const JOB_SEND_SHARE_EMAILS: &str = "send_share_emails";

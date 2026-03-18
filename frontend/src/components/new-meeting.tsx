@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { useCreateMeetingMutation } from "@/lib/hooks/use-meeting-mutations"
 import type { MeetingTimeMode } from "@/lib/types"
 
@@ -29,6 +30,7 @@ export function NewMeetingDialog({
   const [botName, setBotName] = React.useState("")
   const [scheduleLater, setScheduleLater] = React.useState(false)
   const [joinAt, setJoinAt] = React.useState("")
+  const [autoShare, setAutoShare] = React.useState(false)
 
   const createMeeting = useCreateMeetingMutation()
 
@@ -38,6 +40,7 @@ export function NewMeetingDialog({
     setBotName("")
     setScheduleLater(false)
     setJoinAt("")
+    setAutoShare(false)
     setUrlError("")
   }
 
@@ -92,6 +95,7 @@ export function NewMeetingDialog({
           scheduleLater && joinAt
             ? new Date(joinAt).toISOString()
             : undefined,
+        auto_share_enabled: autoShare || undefined,
       },
       {
         onSuccess: () => {
@@ -162,6 +166,14 @@ export function NewMeetingDialog({
               className="size-3.5 rounded border border-input accent-primary"
             />
             <Label htmlFor="schedule-later">Schedule for later</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="auto-share"
+              checked={autoShare}
+              onCheckedChange={setAutoShare}
+            />
+            <Label htmlFor="auto-share">Auto-share with participants</Label>
           </div>
           {scheduleLater && (
             <div className="grid gap-1.5">

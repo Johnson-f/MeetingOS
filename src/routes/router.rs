@@ -20,6 +20,7 @@ use super::{
         list_meetings, me, update_meeting,
     },
     public::{health, not_implemented, root, status},
+    sharing::{get_shared_meeting, list_participants, share_meeting},
     state::AppState,
     webhooks::recall_webhook,
 };
@@ -34,7 +35,8 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/events", get(sse_events))
         .route("/api/v1/webhooks/google-calendar", post(not_implemented))
         .route("/api/v1/calendar/google/callback", get(google_callback))
-        .route("/api/v1/webhooks/microsoft-graph", post(not_implemented));
+        .route("/api/v1/webhooks/microsoft-graph", post(not_implemented))
+        .route("/api/v1/share/{token}", get(get_shared_meeting));
 
     let protected_routes = Router::new()
         .route("/api/v1/me", get(me))
@@ -58,6 +60,11 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         )
         .route("/api/v1/meetings/{meeting_id}/cancel", post(cancel_meeting))
         .route("/api/v1/meetings/{meeting_id}/audio", get(get_audio))
+        .route("/api/v1/meetings/{meeting_id}/share", post(share_meeting))
+        .route(
+            "/api/v1/meetings/{meeting_id}/participants",
+            get(list_participants),
+        )
         .route("/api/v1/notes/{meeting_id}", get(get_note))
         .route("/api/v1/calendar/google/connect", get(google_connect))
         .route(

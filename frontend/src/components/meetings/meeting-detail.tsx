@@ -8,6 +8,8 @@ import { useBackendClient } from "@/lib/hooks/use-backend-client"
 import { useMeetingQuery, useMeetingNoteQuery } from "@/lib/hooks/use-meeting-query"
 import { useQuery } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/service"
+import { ShareDialog } from "./share-dialog"
+import { ParticipantsList } from "./participants-list"
 
 function useAudioUrl(meetingId: string) {
   const client = useBackendClient()
@@ -216,18 +218,27 @@ function SummaryTab({ meetingId }: { meetingId: string }) {
 export function MeetingDetail({ meetingId }: { meetingId: string }) {
   return (
     <div className="flex flex-col gap-4 px-4 py-3">
-      <AudioPlayer meetingId={meetingId} />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex-1">
+          <AudioPlayer meetingId={meetingId} />
+        </div>
+        <ShareDialog meetingId={meetingId} />
+      </div>
       <Separator />
       <Tabs defaultValue="summary">
         <TabsList>
           <TabsTrigger value="summary">Summary</TabsTrigger>
           <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          <TabsTrigger value="participants">Participants</TabsTrigger>
         </TabsList>
         <TabsContent value="summary">
           <SummaryTab meetingId={meetingId} />
         </TabsContent>
         <TabsContent value="transcript">
           <TranscriptTab meetingId={meetingId} />
+        </TabsContent>
+        <TabsContent value="participants">
+          <ParticipantsList meetingId={meetingId} />
         </TabsContent>
       </Tabs>
     </div>

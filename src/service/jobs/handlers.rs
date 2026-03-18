@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use comrak::{Options, markdown_to_html};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
@@ -11,7 +12,7 @@ use crate::{
 use crate::service::vector::chunker::TranscriptSegment;
 
 use super::constants::{
-    JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_STORE_RECORDING_AUDIO,
+    JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_SEND_SHARE_EMAILS, JOB_STORE_RECORDING_AUDIO,
     JOB_TRANSCRIBE_RECORDING, JOB_VECTORIZE_TRANSCRIPT,
 };
 
@@ -117,6 +118,55 @@ pub(super) async fn fetch_recording_media_job(
     info!(meeting_id = %meeting_id, recall_bot_id = %bot.recall_bot_id, "fetching recording media from Recall");
     let response = recall.retrieve_bot(&bot.recall_bot_id).await?;
     let media = recall.extract_recording_media(&response);
+
+    // Extract participants from bot response
+    let participants = recall.extract_participants(&response);
+    for p in &participants {
+        let participant_id = services
+            .turso
+            .upsert_recall_participant(
+                meeting_id,
+                media.recording_id.as_deref(),
+                &p.id,
+                &p.name,
+                p.is_host,
+            )
+            .await?;
+
+        for event in &p.events {
+            services
+                .turso
+                .insert_participant_event(
+                    meeting_id,
+                    media.recording_id.as_deref(),
+                    &participant_id,
+                    &event.event_type,
+                    event.timestamp.as_deref(),
+                    event.relative_ms,
+                    "{}",
+                )
+                .await?;
+
+            if let Some(ts) = event.timestamp.as_deref() {
+                match event.event_type.as_str() {
+                    "join" => {
+                        services
+                            .turso
+                            .update_participant_timestamps(&participant_id, ts, "")
+                            .await?;
+                    }
+                    "leave" => {
+                        services
+                            .turso
+                            .update_participant_timestamps(&participant_id, "", ts)
+                            .await?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    info!(meeting_id = %meeting_id, participant_count = participants.len(), "extracted participants from Recall");
 
     if media.recording_id.is_none() {
         warn!(meeting_id, "recording metadata not ready yet");
@@ -418,6 +468,70 @@ pub(super) async fn generate_note_job(services: &ServiceRegistry, payload: &Valu
         .await?;
 
     broadcast(services, "meeting_updated", Some(meeting_id)).await;
+
+    // Chain auto-share: if enabled, add participants as share recipients and enqueue email job
+    if services
+        .turso
+        .is_auto_share_enabled(meeting_id)
+        .await
+        .unwrap_or(false)
+    {
+        let participants = services
+            .turso
+            .get_participants_with_emails(meeting_id)
+            .await
+            .unwrap_or_default();
+        if !participants.is_empty() {
+            let owner_id = services
+                .turso
+                .get_meeting_owner(meeting_id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let recipients: Vec<(String, Option<String>, Option<String>)> = participants
+                .iter()
+                .map(|(id, email, name)| (email.clone(), name.clone(), Some(id.clone())))
+                .collect();
+            if let Err(e) = services
+                .turso
+                .add_share_recipients(meeting_id, recipients, "auto")
+                .await
+            {
+                warn!(meeting_id = %meeting_id, error = %e, "failed to add auto share recipients");
+            }
+
+            let expiry_days = services.config.resend.share_token_expiry_days;
+            match services
+                .turso
+                .get_or_create_share_token(meeting_id, &owner_id, expiry_days)
+                .await
+            {
+                Ok(token) => {
+                    if let Err(e) = services
+                        .turso
+                        .enqueue_job(
+                            JOB_SEND_SHARE_EMAILS,
+                            Some(&format!("send-share-{meeting_id}")),
+                            &json!({
+                                "meeting_id": meeting_id,
+                                "share_token": token,
+                            }),
+                        )
+                        .await
+                    {
+                        warn!(meeting_id = %meeting_id, error = %e, "failed to enqueue send_share_emails job");
+                    } else {
+                        info!(meeting_id = %meeting_id, "enqueued send_share_emails job for auto-share");
+                    }
+                }
+                Err(e) => {
+                    warn!(meeting_id = %meeting_id, error = %e, "failed to create share token for auto-share");
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -664,6 +778,29 @@ pub(super) async fn schedule_meeting_bots_job(
                         &created_bot.raw_json.to_string(),
                     )
                     .await?;
+
+                // Copy calendar attendees into participants
+                if let Ok(attendees) = services
+                    .turso
+                    .get_calendar_attendees_for_meeting(&meeting_id)
+                    .await
+                {
+                    for attendee in &attendees {
+                        let _ = services
+                            .turso
+                            .upsert_calendar_participant(
+                                &meeting_id,
+                                &attendee.email,
+                                attendee.display_name.as_deref(),
+                                attendee.is_organizer,
+                            )
+                            .await;
+                    }
+                    if !attendees.is_empty() {
+                        info!(meeting_id = %meeting_id, count = attendees.len(), "copied calendar attendees to participants");
+                    }
+                }
+
                 scheduled_count += 1;
             }
             Err(e) => {
@@ -710,4 +847,175 @@ pub(super) async fn migrate_chat_vectors_job(
     qdrant_transcripts.delete_chat_points().await?;
     info!("chat vector migration complete");
     Ok(())
+}
+
+pub(super) async fn send_share_emails_job(
+    services: &ServiceRegistry,
+    payload: &Value,
+) -> Result<()> {
+    let meeting_id = payload
+        .get("meeting_id")
+        .and_then(Value::as_str)
+        .context("missing meeting_id")?;
+    let share_token = payload
+        .get("share_token")
+        .and_then(Value::as_str)
+        .context("missing share_token")?;
+
+    let resend = services
+        .resend
+        .as_ref()
+        .context("resend is not configured")?;
+
+    let owner_id = services
+        .turso
+        .get_meeting_owner(meeting_id)
+        .await?
+        .context("meeting owner not found")?;
+
+    let meeting = services
+        .turso
+        .get_meeting_for_user(&owner_id, meeting_id)
+        .await?
+        .context("meeting not found")?;
+
+    let note = match &meeting.note {
+        Some(n) if n.status == "ready" => n.clone(),
+        Some(_) => {
+            // Note not ready yet — bail so the job retries
+            anyhow::bail!("note is not ready yet, will retry");
+        }
+        None => {
+            anyhow::bail!("no note available yet, will retry");
+        }
+    };
+
+    let app_url = services
+        .config
+        .public_app_url
+        .as_deref()
+        .unwrap_or("https://app.example.com");
+    let share_link = format!("{}/share/{}", app_url.trim_end_matches('/'), share_token);
+
+    let note_title = note.title.as_deref().unwrap_or(&meeting.title);
+    let summary_html = note
+        .summary_markdown
+        .as_deref()
+        .map(|md| markdown_to_html(md, &Options::default()))
+        .unwrap_or_default();
+
+    let key_points_html = if note.key_points.is_empty() {
+        String::new()
+    } else {
+        let items: String = note
+            .key_points
+            .iter()
+            .map(|p| format!("<li>{}</li>", html_escape(p)))
+            .collect();
+        format!(
+            "<h3 style=\"margin:24px 0 8px;\">Key Points</h3><ul style=\"margin:0;padding-left:20px;\">{items}</ul>"
+        )
+    };
+
+    let action_items_html = if note.action_items.is_empty() {
+        String::new()
+    } else {
+        let items: String = note
+            .action_items
+            .iter()
+            .map(|a| {
+                let assignee = a
+                    .assignee_name
+                    .as_deref()
+                    .map(|n| format!(" — <em>{}</em>", html_escape(n)))
+                    .unwrap_or_default();
+                format!("<li>{}{}</li>", html_escape(&a.description), assignee)
+            })
+            .collect();
+        format!(
+            "<h3 style=\"margin:24px 0 8px;\">Action Items</h3><ul style=\"margin:0;padding-left:20px;\">{items}</ul>"
+        )
+    };
+
+    let html_body = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>{title}</title></head>
+<body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#222;">
+  <h2 style="margin-top:0;">{title}</h2>
+  <div style="margin-bottom:16px;">{summary}</div>
+  {key_points}
+  {action_items}
+  <p style="margin-top:32px;">
+    <a href="{link}" style="background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">View Full Meeting Notes</a>
+  </p>
+  <p style="font-size:12px;color:#888;margin-top:24px;">This meeting summary was shared with you. <a href="{link}">{link}</a></p>
+</body>
+</html>"#,
+        title = html_escape(note_title),
+        summary = summary_html,
+        key_points = key_points_html,
+        action_items = action_items_html,
+        link = html_escape(&share_link),
+    );
+
+    let subject = format!("Meeting notes: {}", note_title);
+
+    let recipients = services
+        .turso
+        .get_pending_share_recipients(meeting_id)
+        .await?;
+
+    info!(
+        meeting_id = %meeting_id,
+        recipient_count = recipients.len(),
+        "sending share emails"
+    );
+
+    for recipient in &recipients {
+        match resend
+            .send_email(&recipient.email, &subject, &html_body)
+            .await
+        {
+            Ok(result) => {
+                services
+                    .turso
+                    .record_email_delivery(
+                        meeting_id,
+                        &recipient.email,
+                        "resend",
+                        "sent",
+                        result.provider_message_id.as_deref(),
+                        None,
+                    )
+                    .await?;
+                info!(meeting_id = %meeting_id, email = %recipient.email, "share email sent");
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                warn!(meeting_id = %meeting_id, email = %recipient.email, error = %error_msg, "failed to send share email");
+                services
+                    .turso
+                    .record_email_delivery(
+                        meeting_id,
+                        &recipient.email,
+                        "resend",
+                        "failed",
+                        None,
+                        Some(&error_msg),
+                    )
+                    .await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }

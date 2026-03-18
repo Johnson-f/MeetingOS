@@ -7,4 +7,6 @@ export const queryKeys = {
   meeting: (meetingId: string) => ["backend", "meeting", meetingId] as const,
   note: (meetingId: string) => ["backend", "note", meetingId] as const,
   audio: (meetingId: string) => ["backend", "audio", meetingId] as const,
+  participants: (meetingId: string) => ["participants", meetingId] as const,
+  sharedMeeting: (token: string) => ["shared-meeting", token] as const,
 };

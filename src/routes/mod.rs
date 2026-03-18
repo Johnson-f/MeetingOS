@@ -7,6 +7,7 @@ mod meetings;
 mod public;
 mod router;
 mod search;
+pub mod sharing;
 pub mod state;
 mod webhooks;
 

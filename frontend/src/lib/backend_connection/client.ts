@@ -7,8 +7,12 @@ import type {
   MeetingResponse,
   MeetingsListResponse,
   NoteResponse,
+  ParticipantsResponse,
   SearchResponse,
   ServiceStatusResponse,
+  ShareMeetingPayload,
+  ShareMeetingResponse,
+  SharedMeetingResponse,
   ThreadMessagesResponse,
   ThreadsResponse,
   UpdateMeetingPayload,
@@ -201,6 +205,21 @@ export class BackendClient {
     return this.request<{ success: boolean }>(`/api/v1/chat/threads/${threadId}`, {
       method: "DELETE",
     });
+  }
+
+  getParticipants(meetingId: string) {
+    return this.request<ParticipantsResponse>(`/api/v1/meetings/${meetingId}/participants`);
+  }
+
+  shareMeeting(meetingId: string, payload: ShareMeetingPayload) {
+    return this.request<ShareMeetingResponse>(`/api/v1/meetings/${meetingId}/share`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  getSharedMeeting(token: string) {
+    return this.request<SharedMeetingResponse>(`/api/v1/share/${token}`);
   }
 
   async fetchMeetingAudioBlob(meetingId: string) {

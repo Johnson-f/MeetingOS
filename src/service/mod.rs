@@ -5,6 +5,7 @@ pub mod jobs;
 pub mod qdrant_search;
 pub mod recall_ai;
 pub mod redis;
+pub mod resend;
 pub mod storage;
 pub mod turso;
 pub mod vector;
@@ -18,6 +19,7 @@ use jina::JinaClient;
 use qdrant_search::QdrantClient;
 use recall_ai::RecallAiClient;
 use redis::RedisClient;
+use resend::ResendClient;
 use storage::StorageClient;
 use turso::client::TursoClient;
 
@@ -31,6 +33,7 @@ pub struct ServiceRegistry {
     pub qdrant: Option<QdrantClient>,
     pub qdrant_chat: Option<QdrantClient>,
     pub google_calendar: Option<GoogleCalendarClient>,
+    pub resend: Option<ResendClient>,
     pub config: AppConfig,
     pub sse_tx: broadcast::Sender<SseEvent>,
 }
@@ -55,6 +58,7 @@ impl ServiceRegistry {
         };
         let qdrant_chat = QdrantClient::connect_for_chat(&chat_qdrant_config).await;
         let google_calendar = GoogleCalendarClient::new(&config.google_oauth);
+        let resend = ResendClient::new(&config.resend);
 
         info!(
             recall_ai = recall_ai.is_some(),
@@ -64,6 +68,7 @@ impl ServiceRegistry {
             qdrant = qdrant.is_some(),
             qdrant_chat = qdrant_chat.is_some(),
             google_calendar = google_calendar.is_some(),
+            resend = resend.is_some(),
             groq = config.groq.api_key.is_some(),
             "services initialized"
         );
@@ -77,6 +82,7 @@ impl ServiceRegistry {
             qdrant,
             qdrant_chat,
             google_calendar,
+            resend,
             config,
             sse_tx,
         }

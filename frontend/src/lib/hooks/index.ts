@@ -5,3 +5,5 @@ export * from "./use-current-user-query";
 export * from "./use-meeting-mutations";
 export * from "./use-meeting-query";
 export * from "./use-meetings-query";
+export * from "./use-participants-query";
+export * from "./use-share-mutation";

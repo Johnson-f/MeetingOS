@@ -125,12 +125,14 @@ export interface CreateMeetingPayload {
   meeting_time_mode?: MeetingTimeMode;
   join_at?: string;
   bot_name?: string;
+  auto_share_enabled?: boolean;
 }
 
 export interface UpdateMeetingPayload {
   title?: string;
   scheduled_start_at?: string;
   bot_name?: string;
+  auto_share_enabled?: boolean;
 }
 
 export interface MeetingMutationResponse {
@@ -142,6 +144,43 @@ export interface MeetingActionResponse {
   meeting_id: string;
   status: string;
   processing_status: string;
+}
+
+export interface ParticipantView {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  is_host: boolean;
+  provider_participant_id: string | null;
+  first_joined_at: string | null;
+  last_left_at: string | null;
+}
+
+export interface ParticipantsResponse {
+  participants: ParticipantView[];
+}
+
+export interface ShareMeetingPayload {
+  emails: string[];
+}
+
+export interface ShareMeetingResponse {
+  status: string;
+  recipient_count: number;
+}
+
+export interface SharedMeetingResponse {
+  meeting: {
+    title: string;
+    scheduled_start_at: string | null;
+    actual_start_at: string | null;
+    actual_end_at: string | null;
+    platform: string;
+  };
+  note: NoteView | null;
+  transcription: TranscriptionView | null;
+  participants: ParticipantView[];
+  audio_url: string | null;
 }
 
 export interface MeetingResponse {

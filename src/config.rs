@@ -87,6 +87,13 @@ pub struct GoogleOAuthConfig {
     pub redirect_uri: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResendConfig {
+    pub api_key: Option<String>,
+    pub from_email: String,
+    pub share_token_expiry_days: u64,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -107,6 +114,7 @@ pub struct AppConfig {
     pub jina: JinaConfig,
     pub qdrant: QdrantConfig,
     pub google_oauth: GoogleOAuthConfig,
+    pub resend: ResendConfig,
 }
 
 impl AppConfig {
@@ -193,6 +201,15 @@ impl AppConfig {
                 redirect_uri: env::var("GOOGLE_REDIRECT_URI").unwrap_or_else(|_| {
                     "http://localhost:8080/api/v1/calendar/google/callback".to_owned()
                 }),
+            },
+            resend: ResendConfig {
+                api_key: env::var("RESEND_API_KEY").ok(),
+                from_email: env::var("SHARE_FROM_EMAIL")
+                    .unwrap_or_else(|_| "noreply@meet.tradstry.com".to_owned()),
+                share_token_expiry_days: env::var("SHARE_TOKEN_EXPIRY_DAYS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(30),
             },
         }
     }

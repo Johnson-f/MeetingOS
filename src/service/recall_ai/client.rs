@@ -168,6 +168,59 @@ impl RecallAiClient {
         }
     }
 
+    pub fn extract_participants(&self, payload: &Value) -> Vec<super::types::RecallParticipant> {
+        let participants = payload
+            .get("meeting_participants")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        participants
+            .into_iter()
+            .filter_map(|p| {
+                let id = p.get("id")?.as_str()?.to_owned();
+                let name = p
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Unknown")
+                    .to_owned();
+                let is_host = p.get("is_host").and_then(Value::as_bool).unwrap_or(false);
+
+                let events = p
+                    .get("events")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|e| {
+                        let event_type = e
+                            .get("code")
+                            .or_else(|| e.get("type"))
+                            .and_then(Value::as_str)?
+                            .to_owned();
+                        let timestamp = e
+                            .get("timestamp")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        let relative_ms = e.get("relative_ms").and_then(Value::as_i64);
+                        Some(super::types::RecallParticipantEvent {
+                            event_type,
+                            timestamp,
+                            relative_ms,
+                        })
+                    })
+                    .collect();
+
+                Some(super::types::RecallParticipant {
+                    id,
+                    name,
+                    is_host,
+                    events,
+                })
+            })
+            .collect()
+    }
+
     pub fn verify_webhook(
         &self,
         message_id: &str,

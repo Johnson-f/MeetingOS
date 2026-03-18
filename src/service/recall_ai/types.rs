@@ -72,3 +72,18 @@ pub struct GeneratedNote {
 fn default_action_item_status() -> String {
     "open".to_owned()
 }
+
+#[derive(Debug, Clone)]
+pub struct RecallParticipant {
+    pub id: String,
+    pub name: String,
+    pub is_host: bool,
+    pub events: Vec<RecallParticipantEvent>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecallParticipantEvent {
+    pub event_type: String,
+    pub timestamp: Option<String>,
+    pub relative_ms: Option<i64>,
+}
