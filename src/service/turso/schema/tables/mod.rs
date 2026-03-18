@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS meetings (
     deleted_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    auto_share_enabled INTEGER NOT NULL DEFAULT 0,
     UNIQUE (workspace_id, dedup_key),
     FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
     FOREIGN KEY (created_by_user_id) REFERENCES users(id)
@@ -395,6 +396,17 @@ CREATE TABLE IF NOT EXISTS email_deliveries (
     FOREIGN KEY (meeting_id) REFERENCES meetings(id)
 );
 
+CREATE TABLE IF NOT EXISTS share_tokens (
+    id TEXT PRIMARY KEY,
+    meeting_id TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_by_user_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (meeting_id) REFERENCES meetings(id),
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+);
+
 CREATE TABLE IF NOT EXISTS usage_daily (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
@@ -445,6 +457,8 @@ CREATE INDEX IF NOT EXISTS idx_integration_deliveries_meeting_id ON integration_
 CREATE INDEX IF NOT EXISTS idx_share_recipients_meeting_id ON share_recipients(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_email_deliveries_meeting_id ON email_deliveries(meeting_id);
 CREATE INDEX IF NOT EXISTS idx_usage_daily_workspace_id ON usage_daily(workspace_id, usage_date);
+CREATE INDEX IF NOT EXISTS idx_share_tokens_token ON share_tokens(token);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_share_recipients_meeting_email ON share_recipients(meeting_id, email);
 
 CREATE TABLE IF NOT EXISTS chat_threads (
     id TEXT PRIMARY KEY,
