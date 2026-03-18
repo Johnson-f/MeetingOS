@@ -93,7 +93,7 @@ pub async fn vectorize_chat_qa(
     }
 
     let jina = services.jina.as_ref().context("jina not configured")?;
-    let qdrant = services.qdrant.as_ref().context("qdrant not configured")?;
+    let qdrant = services.qdrant_chat.as_ref().context("qdrant chat collection not configured")?;
 
     let text = format!("Q: {}\nA: {}", question, answer);
     let embeddings = jina.embed(vec![text.clone()], "retrieval.passage").await?;
@@ -112,6 +112,6 @@ pub async fn vectorize_chat_qa(
     };
 
     qdrant.upsert_chat_qa_points(vec![point]).await?;
-    tracing::info!(thread_id = %thread_id, "chat QA vectorized");
+    tracing::info!(thread_id = %thread_id, "chat QA vectorized to chat collection");
     Ok(())
 }
