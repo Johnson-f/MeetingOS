@@ -8,14 +8,16 @@ use crate::service::ServiceRegistry;
 
 use super::{
     constants::{
-        JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_PROCESS_RECALL_EVENT,
-        JOB_SCHEDULE_MEETING_BOTS, JOB_STORE_RECORDING_AUDIO, JOB_SYNC_GOOGLE_CALENDAR,
-        JOB_TRANSCRIBE_RECORDING, JOB_VECTORIZE_CHAT_QA, JOB_VECTORIZE_TRANSCRIPT,
+        JOB_FETCH_RECORDING_MEDIA, JOB_GENERATE_NOTE, JOB_MIGRATE_CHAT_VECTORS,
+        JOB_PROCESS_RECALL_EVENT, JOB_SCHEDULE_MEETING_BOTS, JOB_STORE_RECORDING_AUDIO,
+        JOB_SYNC_GOOGLE_CALENDAR, JOB_TRANSCRIBE_RECORDING, JOB_VECTORIZE_CHAT_QA,
+        JOB_VECTORIZE_TRANSCRIPT,
     },
     handlers::{
-        fetch_recording_media_job, generate_note_job, process_recall_event_job,
-        schedule_meeting_bots_job, store_recording_audio_job, sync_google_calendar_job,
-        transcribe_recording_job, vectorize_chat_qa_job, vectorize_transcript_job,
+        fetch_recording_media_job, generate_note_job, migrate_chat_vectors_job,
+        process_recall_event_job, schedule_meeting_bots_job, store_recording_audio_job,
+        sync_google_calendar_job, transcribe_recording_job, vectorize_chat_qa_job,
+        vectorize_transcript_job,
     },
 };
 
@@ -93,6 +95,7 @@ async fn process_job(services: &ServiceRegistry, payload_json: &str, job_type: &
         JOB_VECTORIZE_CHAT_QA => vectorize_chat_qa_job(services, &payload).await,
         JOB_SYNC_GOOGLE_CALENDAR => sync_google_calendar_job(services, &payload).await,
         JOB_SCHEDULE_MEETING_BOTS => schedule_meeting_bots_job(services, &payload).await,
+        JOB_MIGRATE_CHAT_VECTORS => migrate_chat_vectors_job(services, &payload).await,
         _ => {
             info!(%job_type, "ignoring unknown job type");
             Ok(())

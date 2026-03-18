@@ -3,9 +3,9 @@ use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{
     Condition, CreateCollectionBuilder, CreateFieldIndexCollectionBuilder, DeletePointsBuilder,
     Distance, FieldType, Filter, Fusion, PointStruct, PrefetchQueryBuilder, Query,
-    QueryPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder, SparseVectorsConfigBuilder,
-    UpsertPointsBuilder, Value as QdrantValue, VectorParamsBuilder, VectorsConfig,
-    VectorsConfigBuilder,
+    QueryPointsBuilder, ScrollPointsBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
+    SparseVectorsConfigBuilder, UpsertPointsBuilder, Value as QdrantValue, VectorParamsBuilder,
+    VectorsConfig, VectorsConfigBuilder,
 };
 use tracing::{info, warn};
 
@@ -331,6 +331,76 @@ impl QdrantClient {
             .context("failed to delete meeting chunks from Qdrant")?;
 
         info!(meeting_id = %meeting_id, "deleted chunks from Qdrant");
+        Ok(())
+    }
+
+    /// One-time migration: scroll all chat points from this collection,
+    /// return them so they can be re-inserted into the chat collection.
+    pub async fn extract_chat_points(&self) -> Result<Vec<ChatQAPoint>> {
+        let filter = Filter::must([Condition::matches("source_type", "chat".to_owned())]);
+
+        let response = self
+            .client
+            .scroll(
+                ScrollPointsBuilder::new(&self.collection_name)
+                    .filter(filter)
+                    .limit(1000u32)
+                    .with_payload(true)
+                    .with_vectors(true),
+            )
+            .await
+            .context("failed to scroll chat points")?;
+
+        let points = response
+            .result
+            .into_iter()
+            .filter_map(|point| {
+                let payload = &point.payload;
+                let text = payload.get("text")?.as_str()?.to_owned();
+                let user_id = payload.get("user_id")?.as_str()?.to_owned();
+                let thread_id = payload.get("thread_id")?.as_str()?.to_owned();
+                let created_at = payload
+                    .get("created_at")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default();
+
+                // Extract dense vector using the VectorsOutput helper
+                let vectors_output = point.vectors?;
+                let vector = vectors_output.get_vector_by_name(DENSE_VECTOR_NAME)?;
+                let dense_vector = match vector {
+                    qdrant_client::qdrant::vector_output::Vector::Dense(dv) => dv.data,
+                    _ => return None,
+                };
+
+                Some(ChatQAPoint {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    user_id,
+                    thread_id,
+                    text,
+                    created_at,
+                    dense_vector,
+                })
+            })
+            .collect();
+
+        Ok(points)
+    }
+
+    /// Delete all chat points from this (transcript) collection.
+    pub async fn delete_chat_points(&self) -> Result<()> {
+        self.client
+            .delete_points(
+                DeletePointsBuilder::new(&self.collection_name)
+                    .points(Filter::must([Condition::matches(
+                        "source_type",
+                        "chat".to_owned(),
+                    )]))
+                    .wait(true),
+            )
+            .await
+            .context("failed to delete chat points from transcript collection")?;
+        info!("deleted chat points from transcript collection");
         Ok(())
     }
 }

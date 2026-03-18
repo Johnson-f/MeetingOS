@@ -682,3 +682,26 @@ pub(super) async fn schedule_meeting_bots_job(
     }
     Ok(())
 }
+
+pub(super) async fn migrate_chat_vectors_job(
+    services: &ServiceRegistry,
+    _payload: &Value,
+) -> Result<()> {
+    let qdrant_transcripts = services.qdrant.as_ref().context("qdrant not configured")?;
+    let qdrant_chat = services.qdrant_chat.as_ref().context("qdrant_chat not configured")?;
+
+    info!("migrating chat vectors from transcript collection to chat collection");
+
+    let chat_points = qdrant_transcripts.extract_chat_points().await?;
+    if chat_points.is_empty() {
+        info!("no chat points to migrate");
+        return Ok(());
+    }
+
+    info!(count = chat_points.len(), "extracted chat points, upserting to chat collection");
+    qdrant_chat.upsert_chat_qa_points(chat_points).await?;
+
+    qdrant_transcripts.delete_chat_points().await?;
+    info!("chat vector migration complete");
+    Ok(())
+}
