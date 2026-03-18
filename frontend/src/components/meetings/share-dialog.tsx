@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { useShareMutation } from "@/lib/hooks/use-share-mutation"
+import { toast } from "sonner"
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -21,7 +22,6 @@ export function ShareDialog({ meetingId }: { meetingId: string }) {
   const [inputValue, setInputValue] = React.useState("")
   const [emails, setEmails] = React.useState<string[]>([])
   const [inputError, setInputError] = React.useState("")
-  const [success, setSuccess] = React.useState(false)
 
   const shareMutation = useShareMutation(meetingId)
 
@@ -54,12 +54,11 @@ export function ShareDialog({ meetingId }: { meetingId: string }) {
 
   function handleSubmit() {
     if (emails.length === 0) return
-    setSuccess(false)
+    const count = emails.length
     shareMutation.mutate(emails, {
       onSuccess: () => {
-        setSuccess(true)
-        setEmails([])
-        setInputValue("")
+        toast.info(`Sending to ${count} recipient${count !== 1 ? "s" : ""}...`)
+        setOpen(false)
       },
     })
   }
@@ -70,7 +69,6 @@ export function ShareDialog({ meetingId }: { meetingId: string }) {
       setEmails([])
       setInputValue("")
       setInputError("")
-      setSuccess(false)
       shareMutation.reset()
     }
   }
@@ -127,9 +125,6 @@ export function ShareDialog({ meetingId }: { meetingId: string }) {
             <p className="text-xs text-destructive">
               {(shareMutation.error as Error)?.message ?? "Failed to share meeting"}
             </p>
-          )}
-          {success && (
-            <p className="text-xs text-green-600">Meeting shared successfully!</p>
           )}
           <Button
             onClick={handleSubmit}

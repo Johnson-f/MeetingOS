@@ -18,10 +18,17 @@ pub async fn sse_events(
     let stream = BroadcastStream::new(rx).filter_map(|result| {
         match result {
             Ok(event) => {
-                let data = serde_json::json!({
+                let mut data = serde_json::json!({
                     "type": event.event_type,
                     "meeting_id": event.meeting_id,
                 });
+                if let Some(extra) = event.data {
+                    if let Some(obj) = data.as_object_mut() {
+                        if let Some(extra_obj) = extra.as_object() {
+                            obj.extend(extra_obj.iter().map(|(k, v)| (k.clone(), v.clone())));
+                        }
+                    }
+                }
                 Some(Ok(Event::default().data(data.to_string())))
             }
             Err(_) => None, // lagged, skip

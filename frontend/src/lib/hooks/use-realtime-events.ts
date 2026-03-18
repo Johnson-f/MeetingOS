@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL?.replace(/\/$/, "") ?? "";
@@ -28,6 +29,23 @@ export function useRealtimeEvents() {
       es.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+
+          if (data.type === "share_status") {
+            const { status, sent_count, failed_count, failed_emails } = data;
+            if (status === "success") {
+              toast.success(
+                `Sent to ${sent_count} recipient${sent_count !== 1 ? "s" : ""}`
+              );
+            } else if (status === "partial") {
+              toast.warning(
+                `Sent to ${sent_count}, failed for ${failed_count}: ${failed_emails.map((f: { email: string; reason: string }) => `${f.email} — ${f.reason}`).join(", ")}`
+              );
+            } else if (status === "failed") {
+              toast.error(
+                `Failed to send: ${failed_emails.map((f: { email: string; reason: string }) => `${f.email} — ${f.reason}`).join(", ")}`
+              );
+            }
+          }
 
           if (data.type === "meeting_updated") {
             // Invalidate meetings list and analytics

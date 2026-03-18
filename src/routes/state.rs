@@ -6,6 +6,7 @@ use crate::{config::AppConfig, service::ServiceRegistry};
 pub struct SseEvent {
     pub event_type: String,
     pub meeting_id: Option<String>,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Clone)]

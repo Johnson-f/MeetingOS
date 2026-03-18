@@ -17,9 +17,19 @@ use super::constants::{
 };
 
 async fn broadcast(services: &ServiceRegistry, event_type: &str, meeting_id: Option<&str>) {
+    broadcast_with_data(services, event_type, meeting_id, None).await;
+}
+
+async fn broadcast_with_data(
+    services: &ServiceRegistry,
+    event_type: &str,
+    meeting_id: Option<&str>,
+    data: Option<serde_json::Value>,
+) {
     let _ = services.sse_tx.send(SseEvent {
         event_type: event_type.to_owned(),
         meeting_id: meeting_id.map(str::to_owned),
+        data,
     });
 
     // Invalidate the meeting owner's cached data
@@ -894,7 +904,7 @@ pub(super) async fn send_share_emails_job(
         .config
         .public_app_url
         .as_deref()
-        .unwrap_or("https://app.example.com");
+        .unwrap_or("https://meeting.tradstry.com");
     let share_link = format!("{}/share/{}", app_url.trim_end_matches('/'), share_token);
 
     let note_title = note.title.as_deref().unwrap_or(&meeting.title);
@@ -972,7 +982,44 @@ pub(super) async fn send_share_emails_job(
         "sending share emails"
     );
 
+    let mut sent_count = 0u32;
+    let mut failed_count = 0u32;
+    let mut failed_emails: Vec<(String, String)> = Vec::new(); // (email, reason)
+
     for recipient in &recipients {
+        // MX validation: check domain has mail servers
+        let domain = recipient.email.split('@').nth(1).unwrap_or("");
+        if domain.is_empty() {
+            let reason = "invalid email: missing domain".to_owned();
+            warn!(meeting_id = %meeting_id, email = %recipient.email, "skipping: {}", reason);
+            services
+                .turso
+                .record_email_delivery(meeting_id, &recipient.email, "validation", "failed", None, Some(&reason))
+                .await?;
+            failed_count += 1;
+            failed_emails.push((recipient.email.clone(), reason));
+            continue;
+        }
+
+        match validate_mx(domain).await {
+            Ok(false) => {
+                let reason = format!("no mail server found for domain '{}'", domain);
+                warn!(meeting_id = %meeting_id, email = %recipient.email, "skipping: {}", reason);
+                services
+                    .turso
+                    .record_email_delivery(meeting_id, &recipient.email, "validation", "failed", None, Some(&reason))
+                    .await?;
+                failed_count += 1;
+                failed_emails.push((recipient.email.clone(), reason));
+                continue;
+            }
+            Err(e) => {
+                // DNS lookup failed — don't block sending, just warn
+                warn!(meeting_id = %meeting_id, email = %recipient.email, error = %e, "MX lookup failed, sending anyway");
+            }
+            Ok(true) => {}
+        }
+
         match resend
             .send_email(&recipient.email, &subject, &html_body)
             .await
@@ -989,6 +1036,7 @@ pub(super) async fn send_share_emails_job(
                         None,
                     )
                     .await?;
+                sent_count += 1;
                 info!(meeting_id = %meeting_id, email = %recipient.email, "share email sent");
             }
             Err(e) => {
@@ -1005,11 +1053,50 @@ pub(super) async fn send_share_emails_job(
                         Some(&error_msg),
                     )
                     .await?;
+                failed_count += 1;
+                failed_emails.push((recipient.email.clone(), error_msg));
             }
         }
     }
 
+    // Broadcast result to frontend via SSE
+    let status = if failed_count == 0 { "success" } else if sent_count == 0 { "failed" } else { "partial" };
+    broadcast_with_data(
+        services,
+        "share_status",
+        Some(meeting_id),
+        Some(json!({
+            "status": status,
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "failed_emails": failed_emails.iter().map(|(email, reason)| json!({ "email": email, "reason": reason })).collect::<Vec<_>>(),
+        })),
+    )
+    .await;
+
     Ok(())
+}
+
+async fn validate_mx(domain: &str) -> Result<bool> {
+    use trust_dns_resolver::TokioAsyncResolver;
+    let resolver = TokioAsyncResolver::tokio_from_system_conf()
+        .context("failed to create DNS resolver")?;
+    let mx_lookup = resolver.mx_lookup(domain).await;
+    match mx_lookup {
+        Ok(records) => Ok(records.iter().next().is_some()),
+        Err(e) => {
+            // NXDOMAIN or NODATA means no MX records → domain doesn't accept mail
+            let kind = e.kind();
+            if matches!(
+                kind,
+                trust_dns_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+            ) {
+                Ok(false)
+            } else {
+                Err(anyhow::anyhow!("DNS lookup error for {}: {}", domain, e))
+            }
+        }
+    }
 }
 
 fn html_escape(s: &str) -> String {

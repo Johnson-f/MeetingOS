@@ -205,7 +205,7 @@ impl AppConfig {
             resend: ResendConfig {
                 api_key: env::var("RESEND_API_KEY").ok(),
                 from_email: env::var("SHARE_FROM_EMAIL")
-                    .unwrap_or_else(|_| "noreply@meet.tradstry.com".to_owned()),
+                    .unwrap_or_else(|_| "noreply@meeting.tradstry.com".to_owned()),
                 share_token_expiry_days: env::var("SHARE_TOKEN_EXPIRY_DAYS")
                     .ok()
                     .and_then(|v| v.parse().ok())
