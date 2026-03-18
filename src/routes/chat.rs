@@ -147,6 +147,17 @@ pub async fn chat_stream(
             )
         })?
         .clone();
+    let qdrant_chat = state
+        .services
+        .qdrant_chat
+        .as_ref()
+        .ok_or_else(|| {
+            ApiError::new(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "Qdrant chat collection is not configured",
+            )
+        })?
+        .clone();
 
     let query = payload.query.clone();
     let user_id = user.user_id.clone();
@@ -204,18 +215,34 @@ pub async fn chat_stream(
         )
     })?;
 
-    // 5. Hybrid search in Qdrant
+    // 5. Search both collections in parallel
     let filter_user = if meeting_id.is_some() {
         None
     } else {
         Some(user_id.as_str())
     };
-    let search_results = qdrant
-        .hybrid_search(query_vector, filter_user, 15)
-        .await
-        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    info!(results = search_results.len(), "Qdrant search for chat");
+    let (transcript_results, chat_results) = tokio::join!(
+        qdrant.hybrid_search(query_vector.clone(), filter_user, 15),
+        qdrant_chat.hybrid_search(query_vector, filter_user, 15),
+    );
+
+    let transcript_results = transcript_results.map_err(|e| {
+        ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+    let chat_results = chat_results.map_err(|e| {
+        ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
+
+    // Merge results, keeping source_type for downstream differentiation
+    let mut search_results = transcript_results;
+    search_results.extend(chat_results);
+
+    info!(
+        transcript_count = search_results.iter().filter(|r| r.source_type == "transcript").count(),
+        chat_count = search_results.iter().filter(|r| r.source_type == "chat").count(),
+        "Qdrant parallel search for chat"
+    );
 
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
 
