@@ -106,12 +106,14 @@ async fn process_job(services: &ServiceRegistry, payload_json: &str, job_type: &
 async fn run_periodic_scheduler(services: ServiceRegistry) {
     let mut bot_ticker = tokio::time::interval(TokioDuration::from_secs(120)); // 2 min
     let mut sync_ticker = tokio::time::interval(TokioDuration::from_secs(900)); // 15 min
+    let mut purge_ticker = tokio::time::interval(TokioDuration::from_secs(3600)); // 1 hour
 
     // Skip the first immediate tick
     bot_ticker.tick().await;
     sync_ticker.tick().await;
+    purge_ticker.tick().await;
 
-    info!("periodic scheduler started: bot scheduler every 2m, calendar sync every 15m");
+    info!("periodic scheduler started: bot scheduler every 2m, calendar sync every 15m, dead job purge every 1h");
 
     loop {
         tokio::select! {
@@ -144,6 +146,13 @@ async fn run_periodic_scheduler(services: ServiceRegistry) {
                     Err(e) => {
                         warn!(error = %e, "failed to fetch OAuth connections for periodic sync");
                     }
+                }
+            }
+            _ = purge_ticker.tick() => {
+                match services.turso.purge_dead_jobs(7).await {
+                    Ok(0) => {}
+                    Ok(count) => info!(count, "purged dead jobs older than 7 days"),
+                    Err(e) => warn!(error = %e, "failed to purge dead jobs"),
                 }
             }
         }

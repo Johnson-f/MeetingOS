@@ -242,13 +242,21 @@ impl TursoClient {
 
     pub async fn complete_job(&self, job_id: &str) -> Result<()> {
         let conn = self.connection().await?;
-        let now = now_rfc3339();
-        conn.execute(
-            "UPDATE jobs SET status = 'done', updated_at = ? WHERE id = ?",
-            (now.as_str(), job_id),
-        )
-        .await?;
+        conn.execute("DELETE FROM jobs WHERE id = ?", [job_id])
+            .await?;
         Ok(())
+    }
+
+    pub async fn purge_dead_jobs(&self, older_than_days: i64) -> Result<u64> {
+        let conn = self.connection().await?;
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(older_than_days)).to_rfc3339();
+        let changed = conn
+            .execute(
+                "DELETE FROM jobs WHERE status = 'dead' AND updated_at < ?",
+                [cutoff.as_str()],
+            )
+            .await?;
+        Ok(changed)
     }
 
     pub async fn fail_job(

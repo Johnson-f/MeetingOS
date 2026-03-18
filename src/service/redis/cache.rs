@@ -9,6 +9,8 @@ const ANALYTICS_TTL: u64 = 300; // 5 minutes
 const AUDIO_URL_TTL: u64 = 240; // 4 minutes (presigned URLs expire at 5)
 const NOTE_TTL: u64 = 86400; // 1 day
 const TRANSCRIPT_TTL: u64 = 86400; // 1 day
+const CHAT_THREADS_TTL: u64 = 300; // 5 minutes
+const CHAT_MESSAGES_TTL: u64 = 300; // 5 minutes
 
 // --- Key builders ---
 
@@ -30,6 +32,14 @@ fn note_key(meeting_id: &str) -> String {
 
 fn transcript_key(meeting_id: &str) -> String {
     format!("meeting:{}:transcript", meeting_id)
+}
+
+fn chat_threads_key(user_id: &str, limit: i64) -> String {
+    format!("user:{}:chat_threads:{}", user_id, limit)
+}
+
+fn chat_messages_key(thread_id: &str) -> String {
+    format!("chat_thread:{}:messages", thread_id)
 }
 
 impl RedisClient {
@@ -102,6 +112,49 @@ impl RedisClient {
     pub async fn set_cached_transcript(&self, meeting_id: &str, json: &str) -> Result<()> {
         let key = transcript_key(meeting_id);
         self.set(&key, json, TRANSCRIPT_TTL).await
+    }
+
+    // --- Chat threads ---
+
+    pub async fn get_cached_chat_threads(
+        &self,
+        user_id: &str,
+        limit: i64,
+    ) -> Result<Option<String>> {
+        let key = chat_threads_key(user_id, limit);
+        self.get(&key).await
+    }
+
+    pub async fn set_cached_chat_threads(
+        &self,
+        user_id: &str,
+        limit: i64,
+        json: &str,
+    ) -> Result<()> {
+        let key = chat_threads_key(user_id, limit);
+        self.set(&key, json, CHAT_THREADS_TTL).await
+    }
+
+    // --- Chat messages ---
+
+    pub async fn get_cached_chat_messages(&self, thread_id: &str) -> Result<Option<String>> {
+        let key = chat_messages_key(thread_id);
+        self.get(&key).await
+    }
+
+    pub async fn set_cached_chat_messages(&self, thread_id: &str, json: &str) -> Result<()> {
+        let key = chat_messages_key(thread_id);
+        self.set(&key, json, CHAT_MESSAGES_TTL).await
+    }
+
+    pub async fn invalidate_chat_thread_messages(&self, thread_id: &str) {
+        let _ = self.del(&chat_messages_key(thread_id)).await;
+    }
+
+    pub async fn invalidate_chat_threads(&self, user_id: &str) {
+        for limit in [3, 50] {
+            let _ = self.del(&chat_threads_key(user_id, limit)).await;
+        }
     }
 
     // --- Invalidation ---

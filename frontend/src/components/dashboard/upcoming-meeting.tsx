@@ -358,7 +358,13 @@ export function UpcomingMeetings() {
   const [editMeeting, setEditMeeting] = React.useState<MeetingListItem | null>(null)
   const { data, isLoading } = useMeetingsQuery(100, 0)
   const activeStatuses = new Set(["draft", "scheduled", "joining", "recording", "processing"])
-  const allMeetings = (data?.items ?? []).filter((m) => activeStatuses.has(m.status))
+  const allMeetings = (data?.items ?? [])
+    .filter((m) => activeStatuses.has(m.status))
+    .sort((a, b) => {
+      const dateA = a.scheduled_start_at ?? a.created_at
+      const dateB = b.scheduled_start_at ?? b.created_at
+      return dateA.localeCompare(dateB)
+    })
   const totalPages = Math.ceil(allMeetings.length / PAGE_SIZE)
   const meetings = allMeetings.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
   const todayCount = allMeetings.filter((m) => {

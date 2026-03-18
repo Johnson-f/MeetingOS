@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info};
+use tracing::error;
 
 use super::{helpers::current_user, state::AppState};
 use crate::models::ApiError;
@@ -40,6 +40,7 @@ pub struct ChatRequest {
     pub query: String,
     pub thread_id: Option<String>,
     pub meeting_id: Option<String>,
+    pub meeting_ids: Option<Vec<String>>,
 }
 
 // ── Thread CRUD handlers ──────────────────────────────────────────────
@@ -50,12 +51,32 @@ pub async fn list_threads(
     Query(params): Query<ListThreadsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let user = current_user(&state, &jwt).await?;
+    let limit = params.limit.unwrap_or(50);
+
+    // Try Redis cache first
+    if let Some(redis) = &state.services.redis {
+        if let Ok(Some(cached)) = redis.get_cached_chat_threads(&user.user_id, limit).await {
+            return Ok(axum::response::Response::builder()
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(cached))
+                .unwrap()
+                .into_response());
+        }
+    }
+
     let threads = state
         .services
         .turso
-        .list_chat_threads(&user.user_id, params.limit)
+        .list_chat_threads(&user.user_id, Some(limit))
         .await?;
-    Ok(Json(json!({ "threads": threads })))
+    let body = json!({ "threads": threads });
+
+    if let Some(redis) = &state.services.redis {
+        let json_str = serde_json::to_string(&body).unwrap_or_default();
+        let _ = redis.set_cached_chat_threads(&user.user_id, limit, &json_str).await;
+    }
+
+    Ok(Json(body).into_response())
 }
 
 pub async fn get_thread_messages(
@@ -66,12 +87,35 @@ pub async fn get_thread_messages(
 ) -> Result<impl IntoResponse, ApiError> {
     let user = current_user(&state, &jwt).await?;
     let limit = params.limit.unwrap_or(50);
+
+    // Only cache the initial page (no cursor)
+    if params.before.is_none() {
+        if let Some(redis) = &state.services.redis {
+            if let Ok(Some(cached)) = redis.get_cached_chat_messages(&thread_id).await {
+                return Ok(axum::response::Response::builder()
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(cached))
+                    .unwrap()
+                    .into_response());
+            }
+        }
+    }
+
     let messages = state
         .services
         .turso
         .get_chat_messages(&thread_id, &user.user_id, limit, params.before.as_deref())
         .await?;
-    Ok(Json(json!({ "messages": messages })))
+    let body = json!({ "messages": messages });
+
+    if params.before.is_none() {
+        if let Some(redis) = &state.services.redis {
+            let json_str = serde_json::to_string(&body).unwrap_or_default();
+            let _ = redis.set_cached_chat_messages(&thread_id, &json_str).await;
+        }
+    }
+
+    Ok(Json(body).into_response())
 }
 
 pub async fn update_thread(
@@ -91,6 +135,9 @@ pub async fn update_thread(
             axum::http::StatusCode::NOT_FOUND,
             "thread not found",
         ));
+    }
+    if let Some(redis) = &state.services.redis {
+        redis.invalidate_chat_threads(&user.user_id).await;
     }
     Ok(Json(json!({ "success": true })))
 }
@@ -112,6 +159,10 @@ pub async fn delete_thread(
             "thread not found",
         ));
     }
+    if let Some(redis) = &state.services.redis {
+        redis.invalidate_chat_threads(&user.user_id).await;
+        redis.invalidate_chat_thread_messages(&thread_id).await;
+    }
     Ok(Json(json!({ "success": true })))
 }
 
@@ -122,7 +173,6 @@ pub async fn chat_stream(
     Extension(jwt): Extension<ClerkJwt>,
     Json(payload): Json<ChatRequest>,
 ) -> Result<axum::response::Response, ApiError> {
-    info!(sub = %jwt.sub, query = %payload.query, "POST /api/v1/chat");
     let user = current_user(&state, &jwt).await?;
 
     let jina = state
@@ -163,8 +213,10 @@ pub async fn chat_stream(
     let user_id = user.user_id.clone();
     let workspace_id = user.workspace_id.clone();
     let meeting_id = payload.meeting_id.clone();
+    let meeting_ids = payload.meeting_ids.clone();
     let config = state.services.config.clone();
     let turso = state.services.turso.clone();
+    let redis = state.services.redis.clone();
     let is_new_thread = payload.thread_id.is_none();
 
     // 1. Create or validate thread
@@ -197,6 +249,12 @@ pub async fn chat_stream(
         .await
         .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Invalidate caches after user message insert
+    if let Some(ref redis) = redis {
+        redis.invalidate_chat_thread_messages(&thread_id).await;
+        redis.invalidate_chat_threads(&user_id).await;
+    }
+
     // 3. Load conversation history
     let history = turso
         .get_recent_thread_messages(&thread_id, 20)
@@ -216,15 +274,30 @@ pub async fn chat_stream(
     })?;
 
     // 5. Search both collections in parallel
-    let filter_user = if meeting_id.is_some() {
+    // Combine single meeting_id with meeting_ids array
+    let effective_meeting_ids: Option<Vec<String>> = match (&meeting_id, &meeting_ids) {
+        (Some(id), Some(ids)) => {
+            let mut combined = ids.clone();
+            if !combined.contains(id) {
+                combined.push(id.clone());
+            }
+            Some(combined)
+        }
+        (Some(id), None) => Some(vec![id.clone()]),
+        (None, Some(ids)) if !ids.is_empty() => Some(ids.clone()),
+        _ => None,
+    };
+
+    let has_meeting_filter = effective_meeting_ids.is_some();
+    let filter_user = if has_meeting_filter {
         None
     } else {
         Some(user_id.as_str())
     };
 
     let (transcript_results, chat_results) = tokio::join!(
-        qdrant.hybrid_search(query_vector.clone(), filter_user, 15),
-        qdrant_chat.hybrid_search(query_vector, filter_user, 15),
+        qdrant.hybrid_search(query_vector.clone(), filter_user, effective_meeting_ids.as_deref(), 150),
+        qdrant_chat.hybrid_search(query_vector, filter_user, None, 150),
     );
 
     let transcript_results = transcript_results.map_err(|e| {
@@ -238,13 +311,20 @@ pub async fn chat_stream(
     let mut search_results = transcript_results;
     search_results.extend(chat_results);
 
-    info!(
-        transcript_count = search_results.iter().filter(|r| r.source_type == "transcript").count(),
-        chat_count = search_results.iter().filter(|r| r.source_type == "chat").count(),
-        "Qdrant parallel search for chat"
-    );
-
     let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(64);
+
+    // --- FIX: use a oneshot channel so the title is guaranteed to be sent
+    // before the `done` event, eliminating the race condition where the SSE
+    // channel could be dropped before the title spawn had a chance to write.
+    //
+    // Flow for new threads:
+    //   1. Title spawn runs generate_title(), persists to DB, sends result
+    //      back via `title_tx`.
+    //   2. Main streaming spawn receives the title via `title_rx` (with a
+    //      10 s timeout) just before it sends `done`.
+    //   3. It emits `thread_title` then `done` — always in that order,
+    //      always on the same channel, with no interleaving.
+    // ---
 
     // Send thread_created event for new threads
     if is_new_thread {
@@ -255,10 +335,42 @@ pub async fn chat_stream(
             .await;
     }
 
+    // Kick off title generation in a background task only for new threads.
+    // The oneshot sender is moved into the spawn; the receiver is forwarded
+    // to the main streaming spawn below.
+    let title_rx_opt = if is_new_thread {
+        let (title_tx, title_rx) = tokio::sync::oneshot::channel::<String>();
+
+        let turso_title = turso.clone();
+        let config_title = config.clone();
+        let query_title = query.clone();
+        let thread_id_title = thread_id.clone();
+        let user_id_title = user_id.clone();
+        let redis_title = redis.clone();
+
+        tokio::spawn(async move {
+            let title = generate_title(
+                &turso_title,
+                &config_title,
+                &query_title,
+                &thread_id_title,
+                &user_id_title,
+                redis_title.as_ref(),
+            )
+            .await;
+            let _ = title_tx.send(title);
+        });
+
+        Some(title_rx)
+    } else {
+        None
+    };
+
     if search_results.is_empty() {
         let thread_id_bg = thread_id.clone();
         let turso_bg = turso.clone();
-        let tx_bg = tx.clone();
+        let redis_bg = redis.clone();
+        let user_id_bg = user_id.clone();
         tokio::spawn(async move {
             let no_results_msg =
                 "No relevant transcript content found for your question.".to_string();
@@ -267,6 +379,19 @@ pub async fn chat_stream(
                     json!({"type": "answer_chunk", "content": no_results_msg}).to_string(),
                 )))
                 .await;
+
+            // Wait for the title before sending `done` so the client always
+            // receives `thread_title` first on new threads.
+            if let Some(rx) = title_rx_opt {
+                if let Ok(Ok(title)) = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+                    let _ = tx
+                        .send(Ok(Event::default().data(
+                            json!({"type": "thread_title", "title": title}).to_string(),
+                        )))
+                        .await;
+                }
+            }
+
             let _ = tx
                 .send(Ok(
                     Event::default().data(json!({"type": "done", "sources": []}).to_string())
@@ -285,27 +410,12 @@ pub async fn chat_stream(
             {
                 error!(error = %e, "failed to save assistant message");
             }
-        });
 
-        // Title generation for new thread even with no results
-        if is_new_thread {
-            let turso_title = turso.clone();
-            let config_title = config.clone();
-            let query_title = query.clone();
-            let thread_id_title = thread_id.clone();
-            let user_id_title = user_id.clone();
-            tokio::spawn(async move {
-                generate_and_send_title(
-                    &turso_title,
-                    &config_title,
-                    &query_title,
-                    &thread_id_title,
-                    &user_id_title,
-                    &tx_bg,
-                )
-                .await;
-            });
-        }
+            if let Some(ref redis) = redis_bg {
+                redis.invalidate_chat_thread_messages(&thread_id_bg).await;
+                redis.invalidate_chat_threads(&user_id_bg).await;
+            }
+        });
 
         return Ok(Sse::new(ReceiverStream::new(rx))
             .keep_alive(KeepAlive::default())
@@ -446,9 +556,9 @@ Rules:\n\
     let sources_json_for_save = sources_json.clone();
     let thread_id_bg = thread_id.clone();
     let turso_bg = turso.clone();
-    let config_bg = config.clone();
     let query_bg = query.clone();
     let user_id_bg = user_id.clone();
+    let redis_bg = redis.clone();
 
     tokio::spawn(async move {
         use futures_util::StreamExt;
@@ -502,7 +612,7 @@ Rules:\n\
                 }
                 let data = &line[6..];
                 if data == "[DONE]" {
-                    // Save assistant message
+                    // Save assistant message first
                     let sources_str = serde_json::to_string(&sources_json).unwrap_or_default();
                     if let Err(e) = turso_bg
                         .insert_chat_message(
@@ -533,33 +643,38 @@ Rules:\n\
                         error!(error = %e, "failed to enqueue vectorize_chat_qa job");
                     }
 
+                    // Invalidate caches after assistant message saved
+                    if let Some(ref redis) = redis_bg {
+                        redis.invalidate_chat_thread_messages(&thread_id_bg).await;
+                        redis.invalidate_chat_threads(&user_id_bg).await;
+                    }
+
+                    // Wait for the title before sending `done` so the client
+                    // always receives `thread_title` first on new threads.
+                    // We apply a 10 s timeout so a slow/failed LLM call for
+                    // the title never hangs the stream indefinitely.
+                    if let Some(rx) = title_rx_opt {
+                        if let Ok(Ok(title)) = tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            rx,
+                        )
+                        .await
+                        {
+                            let _ = tx
+                                .send(Ok(Event::default().data(
+                                    json!({"type": "thread_title", "title": title})
+                                        .to_string(),
+                                )))
+                                .await;
+                        }
+                    }
+
                     // Send done event
                     let _ = tx
                         .send(Ok(Event::default().data(
                             json!({"type": "done", "sources": sources_json_for_save}).to_string(),
                         )))
                         .await;
-
-                    // Title generation for new threads
-                    if is_new_thread {
-                        let turso_title = turso_bg.clone();
-                        let config_title = config_bg.clone();
-                        let query_title = query_bg.clone();
-                        let thread_id_title = thread_id_bg.clone();
-                        let user_id_title = user_id_bg.clone();
-                        let tx_title = tx.clone();
-                        tokio::spawn(async move {
-                            generate_and_send_title(
-                                &turso_title,
-                                &config_title,
-                                &query_title,
-                                &thread_id_title,
-                                &user_id_title,
-                                &tx_title,
-                            )
-                            .await;
-                        });
-                    }
 
                     return;
                 }
@@ -581,7 +696,8 @@ Rules:\n\
             }
         }
 
-        // If we get here without [DONE], still save what we have
+        // If we get here without [DONE], still save what we have and emit
+        // the title + done so the client is never left hanging.
         if !full_answer.is_empty() {
             let sources_str = serde_json::to_string(&sources_json).unwrap_or_default();
             if let Err(e) = turso_bg
@@ -606,6 +722,22 @@ Rules:\n\
             {
                 error!(error = %e, "failed to enqueue vectorize_chat_qa job (stream ended)");
             }
+
+            if let Some(ref redis) = redis_bg {
+                redis.invalidate_chat_thread_messages(&thread_id_bg).await;
+                redis.invalidate_chat_threads(&user_id_bg).await;
+            }
+        }
+
+        // Best-effort title flush on abnormal stream end
+        if let Some(rx) = title_rx_opt {
+            if let Ok(Ok(title)) = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+                let _ = tx
+                    .send(Ok(Event::default().data(
+                        json!({"type": "thread_title", "title": title}).to_string(),
+                    )))
+                    .await;
+            }
         }
 
         let _ = tx
@@ -613,26 +745,6 @@ Rules:\n\
                 json!({"type": "done", "sources": sources_json_for_save}).to_string(),
             )))
             .await;
-
-        if is_new_thread {
-            let turso_title = turso_bg.clone();
-            let config_title = config_bg.clone();
-            let query_title = query_bg.clone();
-            let thread_id_title = thread_id_bg.clone();
-            let user_id_title = user_id_bg.clone();
-            let tx_title = tx.clone();
-            tokio::spawn(async move {
-                generate_and_send_title(
-                    &turso_title,
-                    &config_title,
-                    &query_title,
-                    &thread_id_title,
-                    &user_id_title,
-                    &tx_title,
-                )
-                .await;
-            });
-        }
     });
 
     Ok(Sse::new(ReceiverStream::new(rx))
@@ -649,17 +761,25 @@ fn format_ms(ms: i64) -> String {
     format!("{}:{:02}", minutes, seconds)
 }
 
-async fn generate_and_send_title(
+/// Generates a short thread title via Groq, persists it to the DB, and
+/// invalidates the threads cache. Returns the final title string so the
+/// caller can forward it over SSE.
+///
+/// This is intentionally a plain `async fn` (not a spawn) so that the
+/// oneshot sender in the caller drives the lifecycle — no `tx` clone is
+/// needed here.
+async fn generate_title(
     turso: &crate::service::turso::client::TursoClient,
     config: &crate::config::AppConfig,
     query: &str,
     thread_id: &str,
     user_id: &str,
-    tx: &mpsc::Sender<Result<Event, Infallible>>,
-) {
+    redis: Option<&crate::service::redis::RedisClient>,
+) -> String {
     let groq_api_key = config.groq.api_key.clone().unwrap_or_default();
     let groq_base_url = config.groq.api_base_url.clone();
-    let groq_model = config.groq.notes_model.clone();
+
+    let title_model = "llama-3.1-8b-instant".to_string();
 
     let http = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -670,7 +790,7 @@ async fn generate_and_send_title(
         .post(format!("{}/openai/v1/chat/completions", groq_base_url))
         .bearer_auth(&groq_api_key)
         .json(&json!({
-            "model": groq_model,
+            "model": title_model,
             "messages": [
                 {
                     "role": "system",
@@ -688,14 +808,28 @@ async fn generate_and_send_title(
         .await;
 
     let title = match result {
-        Ok(resp) => match resp.json::<Value>().await {
-            Ok(body) => body
-                .pointer("/choices/0/message/content")
-                .and_then(Value::as_str)
-                .map(|s| s.trim().trim_matches('"').to_owned()),
-            Err(_) => None,
-        },
-        Err(_) => None,
+        Ok(resp) => {
+            match resp.text().await {
+                Ok(raw) => {
+                    serde_json::from_str::<Value>(&raw)
+                        .ok()
+                        .and_then(|body| {
+                            body.pointer("/choices/0/message/content")
+                                .and_then(Value::as_str)
+                                .map(|s| s.trim().trim_matches('"').to_owned())
+                                .filter(|s| !s.is_empty())
+                        })
+                }
+                Err(e) => {
+                    error!(error = %e, "generate_title: failed to read Groq response body");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "generate_title: Groq HTTP request failed");
+            None
+        }
     };
 
     let title = title.unwrap_or_else(|| {
@@ -711,12 +845,12 @@ async fn generate_and_send_title(
         .update_chat_thread_title(thread_id, user_id, &title)
         .await
     {
-        error!(error = %e, "failed to update thread title");
+        error!(error = %e, "generate_title: failed to update thread title in DB");
     }
 
-    let _ = tx
-        .send(Ok(Event::default().data(
-            json!({"type": "thread_title", "title": title}).to_string(),
-        )))
-        .await;
+    if let Some(redis) = redis {
+        redis.invalidate_chat_threads(user_id).await;
+    }
+
+    title
 }

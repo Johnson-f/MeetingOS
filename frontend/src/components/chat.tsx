@@ -13,11 +13,16 @@ import {
   Clock01Icon,
 } from "@hugeicons/core-free-icons"
 import { useAuth } from "@clerk/nextjs"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import { useMeetingsQuery } from "@/lib/hooks/use-meetings-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import type { SearchSource, ChatThread } from "@/lib/types"
 
 const BACKEND_URL =
@@ -45,6 +50,15 @@ function formatTimestamp(ms: number) {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
   return `${minutes}:${seconds.toString().padStart(2, "0")}`
+}
+
+function deriveFallbackThreadTitle(query: string): string {
+  const cleaned = query.trim().replace(/\s+/g, " ").replace(/[?.!]+$/, "")
+  if (!cleaned) return "New Chat"
+
+  const words = cleaned.split(" ")
+  const shortTitle = words.slice(0, 6).join(" ")
+  return words.length > 6 ? `${shortTitle}...` : shortTitle
 }
 
 // ── Context so any component can know if the chat panel is open ──
@@ -240,7 +254,6 @@ function ChatPanelRoot() {
         </div>
         <ConversationView
           threadId={null}
-          threadTitle={null}
           onThreadCreated={(id, title) => {
             setActiveThreadId(id)
             setActiveThreadTitle(title)
@@ -340,7 +353,6 @@ function ChatPanelRoot() {
         />
         <ConversationView
           threadId={activeThreadId}
-          threadTitle={activeThreadTitle}
           onThreadCreated={(id, title) => {
             setActiveThreadId(id)
             setActiveThreadTitle(title)
@@ -355,7 +367,7 @@ function ChatPanelRoot() {
   return (
     <>
       <ConversationHeader
-        title={null}
+        title={activeThreadTitle}
         threadId={null}
         onBack={goBackToThreads}
         onClose={toggle}
@@ -363,7 +375,6 @@ function ChatPanelRoot() {
       />
       <ConversationView
         threadId={null}
-        threadTitle={null}
         onThreadCreated={(id, title) => {
           setActiveThreadId(id)
           setActiveThreadTitle(title)
@@ -458,12 +469,10 @@ function ConversationHeader({
 
 function ConversationView({
   threadId,
-  threadTitle,
   onThreadCreated,
   onTitleUpdate,
 }: {
   threadId: string | null
-  threadTitle: string | null
   onThreadCreated: (id: string, title: string | null) => void
   onTitleUpdate: (title: string) => void
 }) {
@@ -472,8 +481,15 @@ function ConversationView({
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = React.useState(false)
   const [loadingMessages, setLoadingMessages] = React.useState(false)
+  const [selectedMeetings, setSelectedMeetings] = React.useState<{ id: string; title: string }[]>([])
+  const [pickerOpen, setPickerOpen] = React.useState(false)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const currentThreadIdRef = React.useRef<string | null>(threadId)
+  const { data: meetingsData } = useMeetingsQuery(100, 0)
+  const completedMeetings = React.useMemo(
+    () => (meetingsData?.items ?? []).filter((m) => m.status === "completed" && m.latest_note_summary),
+    [meetingsData]
+  )
 
   // Keep ref in sync
   React.useEffect(() => {
@@ -527,6 +543,7 @@ function ConversationView({
     if (!input.trim() || isStreaming) return
 
     const query = input.trim()
+    const fallbackTitle = deriveFallbackThreadTitle(query)
     setInput("")
     setMessages((prev) => [...prev, { role: "user", content: query }])
     setIsStreaming(true)
@@ -538,9 +555,12 @@ function ConversationView({
 
     try {
       const token = await getToken()
-      const body: Record<string, string> = { query }
+      const body: Record<string, unknown> = { query }
       if (currentThreadIdRef.current) {
         body.thread_id = currentThreadIdRef.current
+      }
+      if (selectedMeetings.length > 0) {
+        body.meeting_ids = selectedMeetings.map((m) => m.id)
       }
 
       const response = await fetch(`${BACKEND_URL}/api/v1/chat`, {
@@ -562,6 +582,8 @@ function ConversationView({
       const decoder = new TextDecoder()
       let buffer = ""
       let sources: SearchSource[] = []
+      let pendingThreadId: string | null = null
+      let pendingTitle: string | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -594,8 +616,10 @@ function ConversationView({
               })
             } else if (parsed.type === "thread_created") {
               currentThreadIdRef.current = parsed.thread_id
-              onThreadCreated(parsed.thread_id, null)
+              // Defer view transition until stream ends to avoid unmounting mid-stream
+              pendingThreadId = parsed.thread_id
             } else if (parsed.type === "thread_title") {
+              pendingTitle = parsed.title
               onTitleUpdate(parsed.title)
             } else if (parsed.type === "done") {
               sources = parsed.sources ?? []
@@ -631,6 +655,17 @@ function ConversationView({
         }
         return updated
       })
+
+      // Notify parent after stream is fully done so the view transition
+      // doesn't unmount this component mid-stream (which would lose messages
+      // and drop the title event).
+      const resolvedTitle = pendingTitle ?? (pendingThreadId ? fallbackTitle : null)
+      if (pendingThreadId) {
+        onThreadCreated(pendingThreadId, resolvedTitle)
+      }
+      if (!pendingTitle && resolvedTitle) {
+        onTitleUpdate(resolvedTitle)
+      }
     } catch (err) {
       setMessages((prev) => {
         const updated = [...prev]
@@ -653,7 +688,7 @@ function ConversationView({
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <ScrollArea className="flex-1 overflow-hidden px-4">
-        <div className="flex flex-col gap-4 pb-4">
+        <div className="flex flex-col gap-4 pt-4 pb-4">
           {loadingMessages ? (
             <div className="flex flex-col gap-2 py-4">
               {[1, 2, 3].map((i) => (
@@ -685,17 +720,17 @@ function ConversationView({
                       )}
                     </div>
                     {msg.sources && msg.sources.length > 0 && (
-                      <>
-                        <Separator className="my-1" />
-                        <div className="flex flex-col gap-1.5">
-                          <span className="text-[0.65rem] text-muted-foreground font-medium">
-                            Sources ({msg.sources.length})
-                          </span>
+                      <Collapsible>
+                        <CollapsibleTrigger className="flex items-center gap-1.5 text-[0.65rem] text-muted-foreground font-medium hover:text-foreground transition-colors cursor-pointer py-1">
+                          <svg className="size-3 transition-transform [[data-panel-open]_&]:rotate-90" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4.5 2.5L8 6L4.5 9.5" /></svg>
+                          Sources ({msg.sources.length})
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="flex flex-col gap-1.5 mt-1.5">
                           {msg.sources.map((source, j) => (
                             <SourceCard key={j} source={source} index={j} />
                           ))}
-                        </div>
-                      </>
+                        </CollapsibleContent>
+                      </Collapsible>
                     )}
                   </div>
                 )}
@@ -705,22 +740,120 @@ function ConversationView({
           <div ref={scrollRef} />
         </div>
       </ScrollArea>
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 px-4 py-3 border-t">
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about your meetings..."
-          disabled={isStreaming}
-          className="flex-1"
-        />
-        <Button
-          type="submit"
-          size="icon"
-          disabled={isStreaming || !input.trim()}
-        >
-          <HugeiconsIcon icon={SentIcon} strokeWidth={2} className="size-4" />
-          <span className="sr-only">Send</span>
-        </Button>
+      <form onSubmit={handleSubmit} className="px-3 py-3">
+        <div className="rounded-2xl border bg-background shadow-sm">
+          {selectedMeetings.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+              {selectedMeetings.map((m) => (
+                <Badge
+                  key={m.id}
+                  variant="secondary"
+                  className="gap-1 text-[0.65rem] pr-1 cursor-pointer hover:bg-destructive/10 hover:text-destructive transition-colors"
+                  onClick={() => setSelectedMeetings((prev) => prev.filter((s) => s.id !== m.id))}
+                >
+                  {m.title}
+                  <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} className="size-3" />
+                </Badge>
+              ))}
+            </div>
+          )}
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                handleSubmit(e)
+              }
+            }}
+            placeholder={selectedMeetings.length > 0 ? "Ask about these meetings..." : "Ask, Search or Chat..."}
+            disabled={isStreaming}
+            rows={1}
+            className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 max-h-32 overflow-y-auto"
+            style={{ fieldSizing: "content" } as React.CSSProperties}
+          />
+          <div className="flex items-center justify-between px-3 pb-2">
+            <div className="flex items-center gap-2">
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <button type="button" className="flex items-center justify-center size-7 rounded-full border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" />
+                  }
+                >
+                  <HugeiconsIcon icon={PlusSignCircleIcon} strokeWidth={2} className="size-4" />
+                </PopoverTrigger>
+                <PopoverContent side="top" align="start" sideOffset={8} className="w-72 p-0">
+                  <div className="px-3 py-2 border-b">
+                    <p className="text-xs font-medium">Add meetings as context</p>
+                    <p className="text-[0.65rem] text-muted-foreground">Select completed meetings with notes</p>
+                  </div>
+                  <ScrollArea className="max-h-56">
+                    {completedMeetings.length === 0 ? (
+                      <p className="px-3 py-4 text-center text-xs text-muted-foreground">No completed meetings with notes</p>
+                    ) : (
+                      completedMeetings.map((meeting) => {
+                        const isSelected = selectedMeetings.some((s) => s.id === meeting.id)
+                        return (
+                          <button
+                            key={meeting.id}
+                            type="button"
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/50 transition-colors ${isSelected ? "bg-muted/40" : ""}`}
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedMeetings((prev) => prev.filter((s) => s.id !== meeting.id))
+                              } else {
+                                setSelectedMeetings((prev) => [...prev, { id: meeting.id, title: meeting.title }])
+                              }
+                            }}
+                          >
+                            <div className={`size-3.5 rounded border flex items-center justify-center shrink-0 ${isSelected ? "bg-foreground border-foreground" : "border-muted-foreground/40"}`}>
+                              {isSelected && (
+                                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" className="size-2.5 text-background">
+                                  <path d="M2.5 6L5 8.5L9.5 3.5" />
+                                </svg>
+                              )}
+                            </div>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="truncate font-medium">{meeting.title}</span>
+                              <span className="text-[0.6rem] text-muted-foreground">
+                                {meeting.scheduled_start_at
+                                  ? new Date(meeting.scheduled_start_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                                  : "No date"}
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })
+                    )}
+                  </ScrollArea>
+                  {selectedMeetings.length > 0 && (
+                    <div className="border-t px-3 py-2 flex justify-between items-center">
+                      <span className="text-[0.65rem] text-muted-foreground">{selectedMeetings.length} selected</span>
+                      <button
+                        type="button"
+                        className="text-[0.65rem] text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setSelectedMeetings([])}
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+              <span className="text-xs text-muted-foreground">Auto</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={isStreaming || !input.trim()}
+                className="flex items-center justify-center size-7 rounded-full bg-foreground text-background disabled:opacity-30 transition-opacity"
+              >
+                <HugeiconsIcon icon={SentIcon} strokeWidth={2} className="size-3.5" />
+                <span className="sr-only">Send</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </form>
     </div>
   )

@@ -110,7 +110,13 @@ function MeetingRow({ meeting }: { meeting: MeetingListItem }) {
 export function RecentMeetings() {
   const [page, setPage] = React.useState(0)
   const { data, isLoading } = useMeetingsQuery(100, 0)
-  const allMeetings = (data?.items ?? []).filter((m) => m.status === "completed")
+  const allMeetings = (data?.items ?? [])
+    .filter((m) => m.status === "completed")
+    .sort((a, b) => {
+      const dateA = a.scheduled_start_at ?? a.created_at
+      const dateB = b.scheduled_start_at ?? b.created_at
+      return dateB.localeCompare(dateA)
+    })
   const totalPages = Math.ceil(allMeetings.length / PAGE_SIZE)
   const meetings = allMeetings.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 

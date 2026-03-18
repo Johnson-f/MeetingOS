@@ -237,6 +237,7 @@ impl QdrantClient {
         &self,
         query_vector: Vec<f32>,
         user_id: Option<&str>,
+        meeting_ids: Option<&[String]>,
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
         let mut builder = QueryPointsBuilder::new(&self.collection_name)
@@ -250,16 +251,26 @@ impl QdrantClient {
             .limit(limit as u64)
             .with_payload(true);
 
+        let mut conditions: Vec<qdrant_client::qdrant::Condition> = Vec::new();
+
         if let Some(uid) = user_id {
-            builder = builder.filter(Filter::must([Condition::matches(
-                "user_id",
-                uid.to_owned(),
-            )]));
+            conditions.push(Condition::matches("user_id", uid.to_owned()));
+        }
+
+        if let Some(ids) = meeting_ids {
+            if !ids.is_empty() {
+                conditions.push(Condition::matches("meeting_id", ids.to_vec()));
+            }
+        }
+
+        if !conditions.is_empty() {
+            builder = builder.filter(Filter::must(conditions));
         }
 
         info!(
             collection = %self.collection_name,
             user_filter = ?user_id,
+            meeting_ids_filter = ?meeting_ids,
             limit = limit,
             "executing Qdrant hybrid search"
         );
