@@ -345,7 +345,21 @@ impl TursoClient {
             let (meeting_status, processing_status) = match status {
                 "recording" => ("recording", "capturing"),
                 "joining" => ("joining", "pending"),
-                "done" => ("processing", "pending_media"),
+                "done" => {
+                    // Check if the bot ever actually recorded (joined_at is set when status becomes "recording")
+                    let ever_recorded = query_optional_string(
+                        &conn,
+                        "SELECT joined_at FROM recall_bots WHERE recall_bot_id = ? AND joined_at IS NOT NULL LIMIT 1",
+                        params![recall_bot_id.as_str()],
+                    )
+                    .await?
+                    .is_some();
+                    if ever_recorded {
+                        ("processing", "pending_media")
+                    } else {
+                        ("failed", "never_joined")
+                    }
+                }
                 "failed" => ("failed", "failed"),
                 _ => ("scheduled", "pending"),
             };
