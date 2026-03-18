@@ -688,7 +688,10 @@ pub(super) async fn migrate_chat_vectors_job(
     _payload: &Value,
 ) -> Result<()> {
     let qdrant_transcripts = services.qdrant.as_ref().context("qdrant not configured")?;
-    let qdrant_chat = services.qdrant_chat.as_ref().context("qdrant_chat not configured")?;
+    let qdrant_chat = services
+        .qdrant_chat
+        .as_ref()
+        .context("qdrant_chat not configured")?;
 
     info!("migrating chat vectors from transcript collection to chat collection");
 
@@ -698,7 +701,10 @@ pub(super) async fn migrate_chat_vectors_job(
         return Ok(());
     }
 
-    info!(count = chat_points.len(), "extracted chat points, upserting to chat collection");
+    info!(
+        count = chat_points.len(),
+        "extracted chat points, upserting to chat collection"
+    );
     qdrant_chat.upsert_chat_qa_points(chat_points).await?;
 
     qdrant_transcripts.delete_chat_points().await?;

@@ -73,7 +73,9 @@ pub async fn list_threads(
 
     if let Some(redis) = &state.services.redis {
         let json_str = serde_json::to_string(&body).unwrap_or_default();
-        let _ = redis.set_cached_chat_threads(&user.user_id, limit, &json_str).await;
+        let _ = redis
+            .set_cached_chat_threads(&user.user_id, limit, &json_str)
+            .await;
     }
 
     Ok(Json(body).into_response())
@@ -296,16 +298,19 @@ pub async fn chat_stream(
     };
 
     let (transcript_results, chat_results) = tokio::join!(
-        qdrant.hybrid_search(query_vector.clone(), filter_user, effective_meeting_ids.as_deref(), 150),
+        qdrant.hybrid_search(
+            query_vector.clone(),
+            filter_user,
+            effective_meeting_ids.as_deref(),
+            150
+        ),
         qdrant_chat.hybrid_search(query_vector, filter_user, None, 150),
     );
 
-    let transcript_results = transcript_results.map_err(|e| {
-        ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
-    let chat_results = chat_results.map_err(|e| {
-        ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-    })?;
+    let transcript_results = transcript_results
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let chat_results = chat_results
+        .map_err(|e| ApiError::new(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Merge results, keeping source_type for downstream differentiation
     let mut search_results = transcript_results;
@@ -383,7 +388,9 @@ pub async fn chat_stream(
             // Wait for the title before sending `done` so the client always
             // receives `thread_title` first on new threads.
             if let Some(rx) = title_rx_opt {
-                if let Ok(Ok(title)) = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+                if let Ok(Ok(title)) =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), rx).await
+                {
                     let _ = tx
                         .send(Ok(Event::default().data(
                             json!({"type": "thread_title", "title": title}).to_string(),
@@ -537,7 +544,10 @@ Rules:\n\
     // Add the final user message with search context
     let mut context_parts = Vec::new();
     if !transcript_context.is_empty() {
-        context_parts.push(format!("## Meeting Transcript Excerpts\n\n{}", transcript_context));
+        context_parts.push(format!(
+            "## Meeting Transcript Excerpts\n\n{}",
+            transcript_context
+        ));
     }
     if !chat_context.is_empty() {
         context_parts.push(format!("## Previous Conversations\n\n{}", chat_context));
@@ -654,16 +664,12 @@ Rules:\n\
                     // We apply a 10 s timeout so a slow/failed LLM call for
                     // the title never hangs the stream indefinitely.
                     if let Some(rx) = title_rx_opt {
-                        if let Ok(Ok(title)) = tokio::time::timeout(
-                            std::time::Duration::from_secs(10),
-                            rx,
-                        )
-                        .await
+                        if let Ok(Ok(title)) =
+                            tokio::time::timeout(std::time::Duration::from_secs(10), rx).await
                         {
                             let _ = tx
                                 .send(Ok(Event::default().data(
-                                    json!({"type": "thread_title", "title": title})
-                                        .to_string(),
+                                    json!({"type": "thread_title", "title": title}).to_string(),
                                 )))
                                 .await;
                         }
@@ -731,7 +737,8 @@ Rules:\n\
 
         // Best-effort title flush on abnormal stream end
         if let Some(rx) = title_rx_opt {
-            if let Ok(Ok(title)) = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            if let Ok(Ok(title)) = tokio::time::timeout(std::time::Duration::from_secs(5), rx).await
+            {
                 let _ = tx
                     .send(Ok(Event::default().data(
                         json!({"type": "thread_title", "title": title}).to_string(),
@@ -808,24 +815,18 @@ async fn generate_title(
         .await;
 
     let title = match result {
-        Ok(resp) => {
-            match resp.text().await {
-                Ok(raw) => {
-                    serde_json::from_str::<Value>(&raw)
-                        .ok()
-                        .and_then(|body| {
-                            body.pointer("/choices/0/message/content")
-                                .and_then(Value::as_str)
-                                .map(|s| s.trim().trim_matches('"').to_owned())
-                                .filter(|s| !s.is_empty())
-                        })
-                }
-                Err(e) => {
-                    error!(error = %e, "generate_title: failed to read Groq response body");
-                    None
-                }
+        Ok(resp) => match resp.text().await {
+            Ok(raw) => serde_json::from_str::<Value>(&raw).ok().and_then(|body| {
+                body.pointer("/choices/0/message/content")
+                    .and_then(Value::as_str)
+                    .map(|s| s.trim().trim_matches('"').to_owned())
+                    .filter(|s| !s.is_empty())
+            }),
+            Err(e) => {
+                error!(error = %e, "generate_title: failed to read Groq response body");
+                None
             }
-        }
+        },
         Err(e) => {
             error!(error = %e, "generate_title: Groq HTTP request failed");
             None

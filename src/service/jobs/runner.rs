@@ -113,7 +113,9 @@ async fn run_periodic_scheduler(services: ServiceRegistry) {
     sync_ticker.tick().await;
     purge_ticker.tick().await;
 
-    info!("periodic scheduler started: bot scheduler every 2m, calendar sync every 15m, dead job purge every 1h");
+    info!(
+        "periodic scheduler started: bot scheduler every 2m, calendar sync every 15m, dead job purge every 1h"
+    );
 
     loop {
         tokio::select! {
