@@ -176,9 +176,9 @@ export interface SharedMeetingResponse {
     actual_start_at: string | null;
     actual_end_at: string | null;
     platform: string;
+    note: NoteView | null;
+    transcription: TranscriptionView | null;
   };
-  note: NoteView | null;
-  transcription: TranscriptionView | null;
   participants: ParticipantView[];
   audio_url: string | null;
 }
