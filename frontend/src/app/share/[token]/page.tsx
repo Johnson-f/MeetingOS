@@ -68,7 +68,9 @@ export default function SharedMeetingPage() {
     )
   }
 
-  const { meeting, note, transcription, participants, audio_url } = data
+  const { meeting, participants, audio_url } = data
+  const note = meeting.note ?? null
+  const transcription = meeting.transcription ?? null
   const meetingDate =
     formatDate(meeting.actual_start_at) ??
     formatDate(meeting.scheduled_start_at)
