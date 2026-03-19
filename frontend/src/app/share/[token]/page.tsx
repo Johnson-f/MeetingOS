@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query"
 import ReactMarkdown from "react-markdown"
 import { createBackendClient } from "@/lib/backend_connection"
 import { queryKeys } from "@/lib/service"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 
 function formatTimestamp(ms: number) {
   const totalSeconds = Math.floor(ms / 1000)
@@ -109,120 +110,132 @@ export default function SharedMeetingPage() {
           </div>
         )}
 
-        {/* Notes */}
-        {note && (
-          <div className="flex flex-col gap-6">
-            {note.summary_markdown && (
-              <div>
-                <h2 className="text-base font-semibold mb-2">Summary</h2>
-                <div className="prose prose-sm max-w-none text-muted-foreground">
-                  <ReactMarkdown>{note.summary_markdown}</ReactMarkdown>
-                </div>
-              </div>
+        {/* Tabs */}
+        <Tabs defaultValue="summary">
+          <TabsList>
+            <TabsTrigger value="summary">Summary</TabsTrigger>
+            <TabsTrigger value="transcript">Transcript</TabsTrigger>
+            {participants && participants.length > 0 && (
+              <TabsTrigger value="participants">Participants</TabsTrigger>
             )}
+          </TabsList>
 
-            {note.key_points && note.key_points.length > 0 && (
-              <div>
-                <h2 className="text-base font-semibold mb-2">Key Points</h2>
-                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  {note.key_points.map((point, i) => (
-                    <li key={i}>{point}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {note.action_items && note.action_items.length > 0 && (
-              <div>
-                <h2 className="text-base font-semibold mb-2">Action Items</h2>
-                <ul className="text-sm text-muted-foreground space-y-2">
-                  {note.action_items.map((item) => (
-                    <li key={item.id} className="flex items-start gap-2">
-                      <span className="shrink-0 mt-1.5 size-1.5 rounded-full bg-foreground/40" />
-                      <span>
-                        {item.description}
-                        {item.assignee_name && (
-                          <span className="text-foreground/60">
-                            {" "}— {item.assignee_name}
-                          </span>
-                        )}
-                        {item.due_date && (
-                          <span className="text-foreground/60">
-                            {" "}(due {item.due_date})
-                          </span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Participants */}
-        {participants && participants.length > 0 && (
-          <div>
-            <h2 className="text-base font-semibold mb-2">
-              Participants ({participants.length})
-            </h2>
-            <div className="flex flex-col gap-1.5">
-              {participants.map((p) => {
-                const name = p.display_name ?? p.email ?? "Unknown"
-                return (
-                  <div key={p.id} className="flex items-center gap-2 text-sm">
-                    <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold uppercase text-secondary-foreground">
-                      {name.charAt(0)}
+          <TabsContent value="summary">
+            {note ? (
+              <div className="flex flex-col gap-6 pt-4">
+                {note.summary_markdown && (
+                  <div>
+                    <h2 className="text-base font-semibold mb-2">Summary</h2>
+                    <div className="prose prose-sm max-w-none text-muted-foreground">
+                      <ReactMarkdown>{note.summary_markdown}</ReactMarkdown>
                     </div>
-                    <span className="font-medium">{name}</span>
-                    {p.is_host && (
-                      <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">
-                        Host
-                      </span>
-                    )}
-                    {p.email && p.display_name && (
-                      <span className="text-muted-foreground">{p.email}</span>
-                    )}
                   </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+                )}
 
-        {/* Transcript */}
-        {transcription &&
-          transcription.status === "ready" &&
-          (transcription.segments?.length > 0 || transcription.full_text) && (
-            <div>
-              <h2 className="text-base font-semibold mb-2">Transcript</h2>
-              {transcription.segments && transcription.segments.length > 0 ? (
-                <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
-                  {transcription.segments.map((segment) => (
-                    <div key={segment.id} className="flex gap-3">
-                      <span className="shrink-0 text-[0.65rem] text-muted-foreground/60 tabular-nums pt-0.5 w-10 text-right">
-                        {formatTimestamp(segment.start_ms)}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        {segment.speaker_label && (
-                          <span className="text-xs font-medium text-foreground/80">
-                            {segment.speaker_label}:{" "}
+                {note.key_points && note.key_points.length > 0 && (
+                  <div>
+                    <h2 className="text-base font-semibold mb-2">Key Points</h2>
+                    <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+                      {note.key_points.map((point, i) => (
+                        <li key={i}>{point}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {note.action_items && note.action_items.length > 0 && (
+                  <div>
+                    <h2 className="text-base font-semibold mb-2">Action Items</h2>
+                    <ul className="text-sm text-muted-foreground space-y-2">
+                      {note.action_items.map((item) => (
+                        <li key={item.id} className="flex items-start gap-2">
+                          <span className="shrink-0 mt-1.5 size-1.5 rounded-full bg-foreground/40" />
+                          <span>
+                            {item.description}
+                            {item.assignee_name && (
+                              <span className="text-foreground/60">
+                                {" "}— {item.assignee_name}
+                              </span>
+                            )}
+                            {item.due_date && (
+                              <span className="text-foreground/60">
+                                {" "}(due {item.due_date})
+                              </span>
+                            )}
                           </span>
-                        )}
-                        <span className="text-xs text-muted-foreground leading-relaxed">
-                          {segment.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground pt-4">No notes available.</p>
+            )}
+          </TabsContent>
+
+          <TabsContent value="transcript">
+            {transcription &&
+            transcription.status === "ready" &&
+            (transcription.segments?.length > 0 || transcription.full_text) ? (
+              <div className="pt-4">
+                {transcription.segments && transcription.segments.length > 0 ? (
+                  <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
+                    {transcription.segments.map((segment) => (
+                      <div key={segment.id} className="flex gap-3">
+                        <span className="shrink-0 text-[0.65rem] text-muted-foreground/60 tabular-nums pt-0.5 w-10 text-right">
+                          {formatTimestamp(segment.start_ms)}
                         </span>
+                        <div className="flex-1 min-w-0">
+                          {segment.speaker_label && (
+                            <span className="text-xs font-medium text-foreground/80">
+                              {segment.speaker_label}:{" "}
+                            </span>
+                          )}
+                          <span className="text-xs text-muted-foreground leading-relaxed">
+                            {segment.text}
+                          </span>
+                        </div>
                       </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                    {transcription.full_text}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground pt-4">No transcript available.</p>
+            )}
+          </TabsContent>
+
+          {participants && participants.length > 0 && (
+            <TabsContent value="participants">
+              <div className="flex flex-col gap-1.5 pt-4">
+                {participants.map((p) => {
+                  const name = p.display_name ?? p.email ?? "Unknown"
+                  return (
+                    <div key={p.id} className="flex items-center gap-2 text-sm">
+                      <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold uppercase text-secondary-foreground">
+                        {name.charAt(0)}
+                      </div>
+                      <span className="font-medium">{name}</span>
+                      {p.is_host && (
+                        <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">
+                          Host
+                        </span>
+                      )}
+                      {p.email && p.display_name && (
+                        <span className="text-muted-foreground">{p.email}</span>
+                      )}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                  {transcription.full_text}
-                </p>
-              )}
-            </div>
+                  )
+                })}
+              </div>
+            </TabsContent>
           )}
+        </Tabs>
       </main>
 
       {/* Footer */}
