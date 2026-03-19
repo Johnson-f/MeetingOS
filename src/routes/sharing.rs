@@ -67,6 +67,13 @@ pub async fn share_meeting(
 
     let recipient_count = payload.emails.len();
 
+    // Reset old delivery records so re-shares actually send
+    state
+        .services
+        .turso
+        .reset_email_deliveries(&meeting_id, &payload.emails)
+        .await?;
+
     // Add recipients with source "manual"
     let recipients: Vec<(String, Option<String>, Option<String>)> = payload
         .emails

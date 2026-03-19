@@ -85,6 +85,18 @@ impl TursoClient {
         }
     }
 
+    pub async fn reset_email_deliveries(&self, meeting_id: &str, emails: &[String]) -> Result<()> {
+        let conn = self.connection().await?;
+        for email in emails {
+            conn.execute(
+                "DELETE FROM email_deliveries WHERE meeting_id = ? AND recipient_email = ?",
+                params![meeting_id, email.as_str()],
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     pub async fn add_share_recipients(
         &self,
         meeting_id: &str,
