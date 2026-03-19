@@ -900,12 +900,12 @@ pub(super) async fn send_share_emails_job(
         }
     };
 
-    let app_url = services
-        .config
-        .public_app_url
-        .as_deref()
-        .unwrap_or("https://meeting.tradstry.com");
-    let share_link = format!("{}/share/{}", app_url.trim_end_matches('/'), share_token);
+    let frontend_url = &services.config.frontend_url;
+    let share_link = format!(
+        "{}/share/{}",
+        frontend_url.trim_end_matches('/'),
+        share_token
+    );
 
     let note_title = note.title.as_deref().unwrap_or(&meeting.title);
     let summary_html = note

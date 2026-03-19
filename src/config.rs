@@ -102,6 +102,7 @@ pub struct AppConfig {
     pub port: u16,
     pub environment: String,
     pub public_app_url: Option<String>,
+    pub frontend_url: String,
     pub cors_allowed_origins: Vec<String>,
     pub turso_database_url: String,
     pub turso_auth_token: String,
@@ -132,6 +133,8 @@ impl AppConfig {
                 .unwrap_or(3000),
             environment: env::var("APP_ENV").unwrap_or_else(|_| "development".to_owned()),
             public_app_url: env::var("APP_PUBLIC_URL").ok(),
+            frontend_url: env::var("FRONTEND_URL")
+                .unwrap_or_else(|_| "https://meeting.tradstry.com".to_owned()),
             cors_allowed_origins: cors_allowed_origins_from_env(),
             turso_database_url: env::var("TURSO_DATABASE_URL")
                 .expect("TURSO_DATABASE_URL must be set"),
