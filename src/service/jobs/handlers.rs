@@ -994,7 +994,14 @@ pub(super) async fn send_share_emails_job(
             warn!(meeting_id = %meeting_id, email = %recipient.email, "skipping: {}", reason);
             services
                 .turso
-                .record_email_delivery(meeting_id, &recipient.email, "validation", "failed", None, Some(&reason))
+                .record_email_delivery(
+                    meeting_id,
+                    &recipient.email,
+                    "validation",
+                    "failed",
+                    None,
+                    Some(&reason),
+                )
                 .await?;
             failed_count += 1;
             failed_emails.push((recipient.email.clone(), reason));
@@ -1007,7 +1014,14 @@ pub(super) async fn send_share_emails_job(
                 warn!(meeting_id = %meeting_id, email = %recipient.email, "skipping: {}", reason);
                 services
                     .turso
-                    .record_email_delivery(meeting_id, &recipient.email, "validation", "failed", None, Some(&reason))
+                    .record_email_delivery(
+                        meeting_id,
+                        &recipient.email,
+                        "validation",
+                        "failed",
+                        None,
+                        Some(&reason),
+                    )
                     .await?;
                 failed_count += 1;
                 failed_emails.push((recipient.email.clone(), reason));
@@ -1060,7 +1074,13 @@ pub(super) async fn send_share_emails_job(
     }
 
     // Broadcast result to frontend via SSE
-    let status = if failed_count == 0 { "success" } else if sent_count == 0 { "failed" } else { "partial" };
+    let status = if failed_count == 0 {
+        "success"
+    } else if sent_count == 0 {
+        "failed"
+    } else {
+        "partial"
+    };
     broadcast_with_data(
         services,
         "share_status",
@@ -1079,8 +1099,8 @@ pub(super) async fn send_share_emails_job(
 
 async fn validate_mx(domain: &str) -> Result<bool> {
     use trust_dns_resolver::TokioAsyncResolver;
-    let resolver = TokioAsyncResolver::tokio_from_system_conf()
-        .context("failed to create DNS resolver")?;
+    let resolver =
+        TokioAsyncResolver::tokio_from_system_conf().context("failed to create DNS resolver")?;
     let mx_lookup = resolver.mx_lookup(domain).await;
     match mx_lookup {
         Ok(records) => Ok(records.iter().next().is_some()),
