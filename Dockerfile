@@ -23,8 +23,8 @@ WORKDIR /home/appuser
 COPY --from=builder /app/target/release/meeting-bot .
 
 ENV APP_HOST=0.0.0.0
-ENV PORT=8080
+ENV PORT=9010
 
-EXPOSE 8080
+EXPOSE 9010
 
 CMD ["./meeting-bot"]
