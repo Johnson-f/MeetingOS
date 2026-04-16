@@ -8,7 +8,7 @@ pub use groq::GroqClient;
 #[allow(unused_imports)]
 pub use types::{
     GeneratedActionItem, GeneratedNote, GroqSegment, GroqTranscriptionResponse,
-    RecallCreateBotRequest, RecallCreatedBot, RecallRecordingMedia,
+    RecallCreateBotRequest, RecallCreatedBot, RecallRecordingMedia, SpeakerSpan,
 };
 #[allow(unused_imports)]
 pub use utils::{

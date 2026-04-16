@@ -106,16 +106,16 @@ async fn process_job(services: &ServiceRegistry, payload_json: &str, job_type: &
 
 async fn run_periodic_scheduler(services: ServiceRegistry) {
     let mut bot_ticker = tokio::time::interval(TokioDuration::from_secs(120)); // 2 min
-    let mut sync_ticker = tokio::time::interval(TokioDuration::from_secs(900)); // 15 min
     let mut purge_ticker = tokio::time::interval(TokioDuration::from_secs(3600)); // 1 hour
+    let mut watch_renewal_ticker = tokio::time::interval(TokioDuration::from_secs(21600)); // 6 hours
 
     // Skip the first immediate tick
     bot_ticker.tick().await;
-    sync_ticker.tick().await;
     purge_ticker.tick().await;
+    watch_renewal_ticker.tick().await;
 
     info!(
-        "periodic scheduler started: bot scheduler every 2m, calendar sync every 15m, dead job purge every 1h"
+        "periodic scheduler started: bot scheduler every 2m, watch renewal every 6h, dead job purge every 1h"
     );
 
     loop {
@@ -128,28 +128,8 @@ async fn run_periodic_scheduler(services: ServiceRegistry) {
                     &json!({}),
                 ).await;
             }
-            _ = sync_ticker.tick() => {
-                info!("enqueuing periodic calendar sync jobs");
-                // Enqueue a sync job for each active Google OAuth connection
-                match services.turso.get_all_active_oauth_connections("google").await {
-                    Ok(connections) => {
-                        info!(count = connections.len(), "found active Google OAuth connections");
-                        for conn in connections {
-                            let _ = services.turso.enqueue_job(
-                                JOB_SYNC_GOOGLE_CALENDAR,
-                                Some(&format!("periodic-sync-{}", conn.id)),
-                                &json!({
-                                    "oauth_connection_id": conn.id,
-                                    "user_id": conn.user_id,
-                                    "workspace_id": conn.workspace_id,
-                                }),
-                            ).await;
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "failed to fetch OAuth connections for periodic sync");
-                    }
-                }
+            _ = watch_renewal_ticker.tick() => {
+                renew_expiring_watches(&services).await;
             }
             _ = purge_ticker.tick() => {
                 match services.turso.purge_dead_jobs(7).await {
@@ -157,6 +137,119 @@ async fn run_periodic_scheduler(services: ServiceRegistry) {
                     Ok(count) => info!(count, "purged dead jobs older than 7 days"),
                     Err(e) => warn!(error = %e, "failed to purge dead jobs"),
                 }
+            }
+        }
+    }
+}
+
+async fn renew_expiring_watches(services: &ServiceRegistry) {
+    let google = match &services.google_calendar {
+        Some(g) => g,
+        None => return,
+    };
+
+    let public_url = match &services.config.public_app_url {
+        Some(url) => url.clone(),
+        None => {
+            warn!("cannot renew watches: APP_PUBLIC_URL not configured");
+            return;
+        }
+    };
+
+    let webhook_url = format!("{}/api/v1/webhooks/google-calendar", public_url);
+
+    let watches = match services.turso.get_expiring_watches(24).await {
+        Ok(w) => w,
+        Err(e) => {
+            warn!(error = %e, "failed to fetch expiring watches");
+            return;
+        }
+    };
+
+    if watches.is_empty() {
+        return;
+    }
+
+    info!(count = watches.len(), "renewing expiring calendar watches");
+
+    for watch in &watches {
+        // Refresh the access token first
+        let access_token = if let Some(refresh_token) = &watch.refresh_token {
+            match google.refresh_token(refresh_token).await {
+                Ok(tokens) => {
+                    let _ = services
+                        .turso
+                        .update_oauth_tokens(
+                            &watch.oauth_connection_id,
+                            &tokens.access_token,
+                            tokens.refresh_token.as_deref(),
+                        )
+                        .await;
+                    tokens.access_token
+                }
+                Err(e) => {
+                    warn!(
+                        connection_id = %watch.oauth_connection_id,
+                        calendar = %watch.provider_calendar_id,
+                        error = %e,
+                        "failed to refresh token for watch renewal, marking auth_required"
+                    );
+                    let _ = services
+                        .turso
+                        .update_oauth_connection_status(&watch.oauth_connection_id, "auth_required")
+                        .await;
+                    continue;
+                }
+            }
+        } else {
+            warn!(
+                connection_id = %watch.oauth_connection_id,
+                "no refresh token for watch renewal"
+            );
+            continue;
+        };
+
+        // Stop the old watch (best-effort)
+        let _ = google
+            .stop_channel(&access_token, &watch.watch_channel_id, &watch.watch_resource_id)
+            .await;
+
+        // Register a new watch
+        let new_channel_id = crate::service::turso::client::new_id();
+        match google
+            .watch_calendar(
+                &access_token,
+                &watch.provider_calendar_id,
+                &new_channel_id,
+                &webhook_url,
+            )
+            .await
+        {
+            Ok(new_watch) => {
+                let _ = services
+                    .turso
+                    .update_calendar_watch(
+                        &watch.oauth_connection_id,
+                        &watch.provider_calendar_id,
+                        &new_watch.channel_id,
+                        &new_watch.resource_id,
+                        &new_watch.expiration,
+                    )
+                    .await;
+                info!(
+                    calendar = %watch.provider_calendar_id,
+                    old_channel = %watch.watch_channel_id,
+                    new_channel = %new_watch.channel_id,
+                    "renewed calendar watch"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    connection_id = %watch.oauth_connection_id,
+                    calendar = %watch.provider_calendar_id,
+                    error = %e,
+                    "failed to renew calendar watch"
+                );
             }
         }
     }

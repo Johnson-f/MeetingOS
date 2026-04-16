@@ -196,6 +196,23 @@ pub(super) async fn fetch_recording_media_job(
         )
         .await?;
 
+    // Store speaker diarization timeline on the recording
+    let speaker_timeline = recall.extract_speaker_timeline(&response);
+    if !speaker_timeline.is_empty() {
+        if let Ok(timeline_json) = serde_json::to_string(&speaker_timeline) {
+            let _ = services
+                .turso
+                .store_speaker_timeline(&recording.id, &timeline_json)
+                .await;
+            info!(
+                meeting_id = %meeting_id,
+                recording_id = %recording.id,
+                spans = speaker_timeline.len(),
+                "stored speaker diarization timeline"
+            );
+        }
+    }
+
     if let Some(url) = media.audio_download_url.as_deref() {
         info!(meeting_id = %meeting_id, "audio download URL available, enqueuing store job");
         services
@@ -395,6 +412,24 @@ pub(super) async fn transcribe_recording_job(
         .transcribe(audio_bytes, &services.config.groq.transcription_model)
         .await?;
 
+    // Re-label speaker labels using diarization timeline if available
+    let mut segments = groq_response.segments;
+    if let Ok(Some(timeline_json)) = services.turso.get_speaker_timeline(recording_id).await {
+        if let Ok(timeline) = serde_json::from_str::<Vec<crate::service::recall_ai::SpeakerSpan>>(&timeline_json) {
+            if !timeline.is_empty() {
+                segments = relabel_segments_with_speakers(&segments, &timeline);
+                info!(
+                    recording_id = %recording_id,
+                    "re-labeled transcript segments with speaker names from diarization"
+                );
+            }
+        }
+    }
+
+    // Build speaker-attributed transcript for note generation
+    // This replaces the raw Whisper full_text with "Speaker: text" format
+    let full_text = build_speaker_attributed_text(&segments, &groq_response.text);
+
     info!(recording_id = %recording_id, language = ?groq_response.language, "transcription complete, storing result");
     let transcription = services
         .turso
@@ -404,9 +439,9 @@ pub(super) async fn transcribe_recording_job(
             "groq",
             &services.config.groq.transcription_model,
             groq_response.language.as_deref(),
-            &groq_response.text,
+            &full_text,
             &groq_response.raw_json,
-            groq_response.segments,
+            segments,
         )
         .await?;
 
@@ -1135,4 +1170,85 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+/// For each transcript segment, find the speaker span with the most temporal overlap
+/// and replace the segment's speaker_label with the speaker's actual name.
+fn relabel_segments_with_speakers(
+    segments: &[crate::service::recall_ai::GroqSegment],
+    timeline: &[crate::service::recall_ai::SpeakerSpan],
+) -> Vec<crate::service::recall_ai::GroqSegment> {
+    segments
+        .iter()
+        .map(|seg| {
+            let mut best_name: Option<&str> = None;
+            let mut best_overlap: i64 = 0;
+
+            for span in timeline {
+                let overlap_start = seg.start_ms.max(span.start_ms);
+                let overlap_end = seg.end_ms.min(span.end_ms);
+                let overlap = (overlap_end - overlap_start).max(0);
+
+                if overlap > best_overlap {
+                    best_overlap = overlap;
+                    best_name = Some(&span.name);
+                }
+            }
+
+            let mut relabeled = seg.clone();
+            if let Some(name) = best_name {
+                relabeled.speaker_label = Some(name.to_owned());
+            }
+            relabeled
+        })
+        .collect()
+}
+
+/// Build a speaker-attributed transcript from re-labeled segments.
+/// Groups consecutive segments by the same speaker to avoid repetitive labels.
+/// Falls back to the raw Whisper text if no segments have speaker labels.
+fn build_speaker_attributed_text(
+    segments: &[crate::service::recall_ai::GroqSegment],
+    fallback_text: &str,
+) -> String {
+    let has_speakers = segments.iter().any(|s| s.speaker_label.is_some());
+    if !has_speakers {
+        return fallback_text.to_owned();
+    }
+
+    let mut lines = Vec::new();
+    let mut current_speaker: Option<&str> = None;
+    let mut current_text = String::new();
+
+    for seg in segments {
+        let speaker = seg.speaker_label.as_deref().unwrap_or("Unknown");
+
+        if current_speaker == Some(speaker) {
+            // Same speaker — append text
+            current_text.push(' ');
+            current_text.push_str(seg.text.trim());
+        } else {
+            // New speaker — flush previous
+            if !current_text.is_empty() {
+                lines.push(format!(
+                    "{}: {}",
+                    current_speaker.unwrap_or("Unknown"),
+                    current_text.trim()
+                ));
+            }
+            current_speaker = Some(speaker);
+            current_text = seg.text.trim().to_owned();
+        }
+    }
+
+    // Flush last speaker
+    if !current_text.is_empty() {
+        lines.push(format!(
+            "{}: {}",
+            current_speaker.unwrap_or("Unknown"),
+            current_text.trim()
+        ));
+    }
+
+    lines.join("\n")
 }

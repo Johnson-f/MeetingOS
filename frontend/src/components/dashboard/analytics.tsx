@@ -4,7 +4,6 @@ import {
   Calendar03Icon,
   ChartUpIcon,
   Clock01Icon,
-  LinkSquare01Icon,
   TaskDone01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -26,10 +25,9 @@ export function SectionCards() {
   const previousThisWeek = data?.meetings_this_week_previous ?? 0;
   const upcomingThisWeek = data?.meetings_this_week_upcoming ?? 0;
   const recordedHours = data?.recorded_hours ?? 0;
-  const integrationLabel = data?.integrations.label ?? "Coming soon";
 
   return (
-    <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-linear-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4 dark:*:data-[slot=card]:bg-card">
+    <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-linear-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-3 dark:*:data-[slot=card]:bg-card">
       <Card size="sm" className="@container/card">
         <CardHeader>
           <CardDescription>Total Meetings</CardDescription>
@@ -100,30 +98,6 @@ export function SectionCards() {
             Total audio duration across recordings{" "}
             <HugeiconsIcon
               icon={Clock01Icon}
-              strokeWidth={2}
-              className="size-4"
-            />
-          </div>
-        </CardFooter>
-      </Card>
-      <Card size="sm" className="@container/card">
-        <CardHeader>
-          <CardDescription>Integrations</CardDescription>
-          <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
-            {integrationLabel}
-          </CardTitle>
-          <CardAction>
-            <Badge variant="outline">
-              <HugeiconsIcon icon={LinkSquare01Icon} strokeWidth={2} />
-              placeholder
-            </Badge>
-          </CardAction>
-        </CardHeader>
-        <CardFooter className="items-start text-sm">
-          <div className="line-clamp-1 flex gap-2 font-medium">
-            Integration analytics are reserved for a later pass{" "}
-            <HugeiconsIcon
-              icon={LinkSquare01Icon}
               strokeWidth={2}
               className="size-4"
             />

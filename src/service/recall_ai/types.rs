@@ -87,3 +87,10 @@ pub struct RecallParticipantEvent {
     pub timestamp: Option<String>,
     pub relative_ms: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpeakerSpan {
+    pub name: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+}

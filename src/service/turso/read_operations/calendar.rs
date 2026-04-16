@@ -1,5 +1,6 @@
 use anyhow::Result;
 use libsql::params;
+use chrono;
 
 use super::super::client::TursoClient;
 use super::helpers::query_optional_string;
@@ -30,7 +31,6 @@ pub struct StoredCalendarEvent {
 
 #[derive(Debug, Clone)]
 pub struct CalendarWatch {
-    pub provider_calendar_id: String,
     pub watch_channel_id: String,
     pub watch_resource_id: String,
 }
@@ -42,6 +42,15 @@ pub struct GoogleCalendarStatus {
     pub calendars_count: i64,
     pub last_synced_at: Option<String>,
     pub connected_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpiringWatch {
+    pub oauth_connection_id: String,
+    pub refresh_token: Option<String>,
+    pub provider_calendar_id: String,
+    pub watch_channel_id: String,
+    pub watch_resource_id: String,
 }
 
 impl TursoClient {
@@ -86,31 +95,6 @@ impl TursoClient {
             }));
         }
         Ok(None)
-    }
-
-    pub async fn get_all_active_oauth_connections(
-        &self,
-        provider: &str,
-    ) -> Result<Vec<StoredOAuthConnection>> {
-        let conn = self.connection().await?;
-        let mut rows = conn
-            .query(
-                "SELECT id, user_id, workspace_id, access_token_encrypted, refresh_token_encrypted FROM oauth_connections WHERE provider = ? AND status = 'connected'",
-                params![provider],
-            )
-            .await?;
-
-        let mut connections = Vec::new();
-        while let Some(row) = rows.next().await? {
-            connections.push(StoredOAuthConnection {
-                id: row.get::<String>(0)?,
-                user_id: row.get::<String>(1)?,
-                workspace_id: row.get::<String>(2)?,
-                access_token: row.get::<Option<String>>(3)?,
-                refresh_token: row.get::<Option<String>>(4)?,
-            });
-        }
-        Ok(connections)
     }
 
     pub async fn update_oauth_tokens(
@@ -186,7 +170,7 @@ impl TursoClient {
         let conn = self.connection().await?;
         let mut rows = conn
             .query(
-                "SELECT provider_calendar_id, watch_channel_id, watch_resource_id FROM calendar_calendars WHERE oauth_connection_id = ? AND watch_channel_id IS NOT NULL AND watch_resource_id IS NOT NULL",
+                "SELECT watch_channel_id, watch_resource_id FROM calendar_calendars WHERE oauth_connection_id = ? AND watch_channel_id IS NOT NULL AND watch_resource_id IS NOT NULL",
                 params![oauth_connection_id],
             )
             .await?;
@@ -194,9 +178,75 @@ impl TursoClient {
         let mut watches = Vec::new();
         while let Some(row) = rows.next().await? {
             watches.push(CalendarWatch {
-                provider_calendar_id: row.get::<String>(0)?,
-                watch_channel_id: row.get::<String>(1)?,
-                watch_resource_id: row.get::<String>(2)?,
+                watch_channel_id: row.get::<String>(0)?,
+                watch_resource_id: row.get::<String>(1)?,
+            });
+        }
+        Ok(watches)
+    }
+
+    pub async fn get_connection_by_watch_channel(
+        &self,
+        channel_id: &str,
+    ) -> Result<Option<StoredOAuthConnection>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                r#"
+            SELECT oc.id, oc.user_id, oc.workspace_id, oc.access_token_encrypted, oc.refresh_token_encrypted
+            FROM calendar_calendars cc
+            JOIN oauth_connections oc ON oc.id = cc.oauth_connection_id
+            WHERE cc.watch_channel_id = ?
+              AND oc.status IN ('connected', 'auth_required')
+            LIMIT 1
+            "#,
+                params![channel_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(Some(StoredOAuthConnection {
+                id: row.get::<String>(0)?,
+                user_id: row.get::<String>(1)?,
+                workspace_id: row.get::<String>(2)?,
+                access_token: row.get::<Option<String>>(3)?,
+                refresh_token: row.get::<Option<String>>(4)?,
+            }));
+        }
+        Ok(None)
+    }
+
+    /// Find watches expiring within `hours` hours, for connected accounts only.
+    pub async fn get_expiring_watches(&self, hours: i64) -> Result<Vec<ExpiringWatch>> {
+        let conn = self.connection().await?;
+        let threshold_ms = (chrono::Utc::now() + chrono::Duration::hours(hours))
+            .timestamp_millis()
+            .to_string();
+
+        let mut rows = conn
+            .query(
+                r#"
+            SELECT cc.oauth_connection_id, oc.refresh_token_encrypted,
+                   cc.provider_calendar_id, cc.watch_channel_id, cc.watch_resource_id
+            FROM calendar_calendars cc
+            JOIN oauth_connections oc ON oc.id = cc.oauth_connection_id
+            WHERE cc.watch_channel_id IS NOT NULL
+              AND cc.watch_expires_at IS NOT NULL
+              AND CAST(cc.watch_expires_at AS INTEGER) < CAST(? AS INTEGER)
+              AND oc.status = 'connected'
+            "#,
+                params![threshold_ms],
+            )
+            .await?;
+
+        let mut watches = Vec::new();
+        while let Some(row) = rows.next().await? {
+            watches.push(ExpiringWatch {
+                oauth_connection_id: row.get::<String>(0)?,
+                refresh_token: row.get::<Option<String>>(1)?,
+                provider_calendar_id: row.get::<String>(2)?,
+                watch_channel_id: row.get::<String>(3)?,
+                watch_resource_id: row.get::<String>(4)?,
             });
         }
         Ok(watches)

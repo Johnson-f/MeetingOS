@@ -6,7 +6,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::models::{ApiError, RecallWebhookAck};
 
@@ -99,4 +99,82 @@ pub async fn recall_webhook(
         provider_event_id,
         event_type,
     }))
+}
+
+/// POST /api/v1/webhooks/google-calendar — Google Calendar push notification
+pub async fn google_calendar_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> StatusCode {
+    let channel_id = headers
+        .get("x-goog-channel-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let resource_state = headers
+        .get("x-goog-resource-state")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+
+    info!(
+        channel_id = %channel_id,
+        resource_state = %resource_state,
+        "Google Calendar webhook received"
+    );
+
+    // "sync" is the initial handshake when a watch is first registered
+    if resource_state == "sync" {
+        return StatusCode::OK;
+    }
+
+    // "exists" means something changed in the calendar
+    if resource_state != "exists" {
+        info!(resource_state = %resource_state, "ignoring unknown resource state");
+        return StatusCode::OK;
+    }
+
+    if channel_id.is_empty() {
+        warn!("Google Calendar webhook missing channel ID");
+        return StatusCode::OK;
+    }
+
+    // Look up which connection owns this watch channel
+    let connection = match state
+        .services
+        .turso
+        .get_connection_by_watch_channel(channel_id)
+        .await
+    {
+        Ok(Some(conn)) => conn,
+        Ok(None) => {
+            warn!(channel_id = %channel_id, "no connection found for watch channel");
+            return StatusCode::OK;
+        }
+        Err(e) => {
+            warn!(channel_id = %channel_id, error = %e, "failed to look up watch channel");
+            return StatusCode::OK;
+        }
+    };
+
+    // Enqueue a sync job (deduped so rapid-fire notifications don't spam)
+    let _ = state
+        .services
+        .turso
+        .enqueue_job(
+            "sync_google_calendar",
+            Some(&format!("webhook-sync-{}", channel_id)),
+            &json!({
+                "oauth_connection_id": connection.id,
+                "user_id": connection.user_id,
+                "workspace_id": connection.workspace_id,
+            }),
+        )
+        .await;
+
+    info!(
+        channel_id = %channel_id,
+        connection_id = %connection.id,
+        "enqueued calendar sync from webhook"
+    );
+
+    StatusCode::OK
 }

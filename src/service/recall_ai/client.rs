@@ -63,6 +63,21 @@ impl RecallAiClient {
                     "waiting_room_timeout": 300,
                     "noone_joined_timeout": 300,
                     "everyone_left_timeout": 40,
+                    "silence_detection": {
+                        "timeout": 600,
+                        "activate_after": 300,
+                    },
+                    "bot_detection": {
+                        "using_participant_events": {
+                            "timeout": 60,
+                            "activate_after": 300,
+                        },
+                    },
+                    "in_call_not_recording_timeout": 600,
+                    "recording_permission_denied_timeout": 60,
+                },
+                "diarization": {
+                    "use_separate_streams_when_available": true,
                 }
             }))
             .send()
@@ -219,6 +234,56 @@ impl RecallAiClient {
                 })
             })
             .collect()
+    }
+
+    /// Extract a flat, sorted list of speaker spans from Recall's diarization data.
+    /// Each participant's `speaker_timeline` contains `{timestamp, duration}` entries
+    /// where timestamp and duration are in seconds (f64).
+    pub fn extract_speaker_timeline(&self, payload: &Value) -> Vec<super::types::SpeakerSpan> {
+        let participants = payload
+            .get("meeting_participants")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut spans: Vec<super::types::SpeakerSpan> = Vec::new();
+
+        for p in &participants {
+            let name = p
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("Unknown")
+                .to_owned();
+
+            let timeline = match p.get("speaker_timeline").and_then(Value::as_array) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            for entry in timeline {
+                let timestamp_s = entry
+                    .get("timestamp")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                let duration_s = entry
+                    .get("duration")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0);
+                let start_ms = (timestamp_s * 1000.0).round() as i64;
+                let end_ms = ((timestamp_s + duration_s) * 1000.0).round() as i64;
+
+                if end_ms > start_ms {
+                    spans.push(super::types::SpeakerSpan {
+                        name: name.clone(),
+                        start_ms,
+                        end_ms,
+                    });
+                }
+            }
+        }
+
+        spans.sort_by_key(|s| s.start_ms);
+        spans
     }
 
     pub fn verify_webhook(

@@ -473,4 +473,33 @@ impl TursoClient {
 
         Ok(())
     }
+
+    pub async fn store_speaker_timeline(
+        &self,
+        recording_id: &str,
+        timeline_json: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        conn.execute(
+            "UPDATE recordings SET speaker_timeline_json = ?, updated_at = ? WHERE id = ?",
+            (timeline_json, now_rfc3339(), recording_id),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_speaker_timeline(&self, recording_id: &str) -> Result<Option<String>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT speaker_timeline_json FROM recordings WHERE id = ? LIMIT 1",
+                params![recording_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(row.get::<Option<String>>(0)?);
+        }
+        Ok(None)
+    }
 }

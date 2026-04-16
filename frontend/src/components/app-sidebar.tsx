@@ -14,7 +14,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { DashboardSquare01Icon, Video01Icon, Link04Icon, Calendar01Icon, CommandIcon } from "@hugeicons/core-free-icons"
+import { DashboardSquare01Icon, Video01Icon, Calendar01Icon, CommandIcon } from "@hugeicons/core-free-icons"
 
 const data = {
   navMain: [
@@ -30,13 +30,6 @@ const data = {
       url: "/dashboard/meetings",
       icon: (
         <HugeiconsIcon icon={Video01Icon} strokeWidth={2} />
-      ),
-    },
-    {
-      title: "Integration",
-      url: "/dashboard/integrations",
-      icon: (
-        <HugeiconsIcon icon={Link04Icon} strokeWidth={2} />
       ),
     },
     {

@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     duration_seconds INTEGER,
     started_at TEXT,
     ended_at TEXT,
+    speaker_timeline_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (meeting_id) REFERENCES meetings(id),
