@@ -28,6 +28,22 @@ pub struct StoredCalendarEvent {
     pub scheduled_start_at: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CalendarWatch {
+    pub provider_calendar_id: String,
+    pub watch_channel_id: String,
+    pub watch_resource_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GoogleCalendarStatus {
+    pub connected: bool,
+    pub status: String,
+    pub calendars_count: i64,
+    pub last_synced_at: Option<String>,
+    pub connected_at: Option<String>,
+}
+
 impl TursoClient {
     pub async fn store_oauth_connection(
         &self,
@@ -55,7 +71,7 @@ impl TursoClient {
         let conn = self.connection().await?;
         let mut rows = conn
             .query(
-                "SELECT id, user_id, workspace_id, access_token_encrypted, refresh_token_encrypted FROM oauth_connections WHERE user_id = ? AND provider = ? AND status = 'connected' LIMIT 1",
+                "SELECT id, user_id, workspace_id, access_token_encrypted, refresh_token_encrypted FROM oauth_connections WHERE user_id = ? AND provider = ? AND status IN ('connected', 'auth_required') LIMIT 1",
                 params![user_id, provider],
             )
             .await?;
@@ -161,6 +177,99 @@ impl TursoClient {
             });
         }
         Ok(calendars)
+    }
+
+    pub async fn get_calendar_watches(
+        &self,
+        oauth_connection_id: &str,
+    ) -> Result<Vec<CalendarWatch>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT provider_calendar_id, watch_channel_id, watch_resource_id FROM calendar_calendars WHERE oauth_connection_id = ? AND watch_channel_id IS NOT NULL AND watch_resource_id IS NOT NULL",
+                params![oauth_connection_id],
+            )
+            .await?;
+
+        let mut watches = Vec::new();
+        while let Some(row) = rows.next().await? {
+            watches.push(CalendarWatch {
+                provider_calendar_id: row.get::<String>(0)?,
+                watch_channel_id: row.get::<String>(1)?,
+                watch_resource_id: row.get::<String>(2)?,
+            });
+        }
+        Ok(watches)
+    }
+
+    pub async fn delete_events_for_connection(&self, oauth_connection_id: &str) -> Result<u64> {
+        let conn = self.connection().await?;
+        let result = conn
+            .execute(
+                "DELETE FROM calendar_events WHERE calendar_id IN (SELECT id FROM calendar_calendars WHERE oauth_connection_id = ?)",
+                params![oauth_connection_id],
+            )
+            .await?;
+        Ok(result)
+    }
+
+    pub async fn delete_calendars_for_connection(&self, oauth_connection_id: &str) -> Result<u64> {
+        let conn = self.connection().await?;
+        let result = conn
+            .execute(
+                "DELETE FROM calendar_calendars WHERE oauth_connection_id = ?",
+                params![oauth_connection_id],
+            )
+            .await?;
+        Ok(result)
+    }
+
+    pub async fn update_oauth_connection_status(
+        &self,
+        connection_id: &str,
+        status: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        conn.execute(
+            "UPDATE oauth_connections SET status = ?, updated_at = ? WHERE id = ?",
+            (status, now_rfc3339(), connection_id),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_google_calendar_status(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<GoogleCalendarStatus>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                r#"
+            SELECT oc.status, oc.created_at,
+                   COUNT(cc.id) as calendars_count,
+                   MAX(cc.last_synced_at) as last_synced_at
+            FROM oauth_connections oc
+            LEFT JOIN calendar_calendars cc ON cc.oauth_connection_id = oc.id AND cc.status = 'active'
+            WHERE oc.user_id = ? AND oc.provider = 'google' AND oc.status != 'disconnected'
+            GROUP BY oc.id
+            LIMIT 1
+            "#,
+                params![user_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            let status: String = row.get(0)?;
+            return Ok(Some(GoogleCalendarStatus {
+                connected: status == "connected" || status == "auth_required",
+                status,
+                calendars_count: row.get::<i64>(2)?,
+                last_synced_at: row.get::<Option<String>>(3)?,
+                connected_at: row.get::<Option<String>>(1)?,
+            }));
+        }
+        Ok(None)
     }
 
     pub async fn update_calendar_sync_cursor(

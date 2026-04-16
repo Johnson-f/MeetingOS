@@ -12,7 +12,7 @@ use tower_http::{
 
 use super::{
     analytics::analytics_overview,
-    calendar::{google_callback, google_connect, google_disconnect, google_resync},
+    calendar::{google_callback, google_connect, google_disconnect, google_resync, google_status},
     chat::{chat_stream, delete_thread, get_thread_messages, list_threads, update_thread},
     events::sse_events,
     meetings::{
@@ -72,6 +72,7 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
             post(google_disconnect),
         )
         .route("/api/v1/calendar/google/resync", post(google_resync))
+        .route("/api/v1/calendar/google/status", get(google_status))
         .route("/api/v1/calendar/microsoft/connect", post(not_implemented))
         .route("/api/v1/calendar/microsoft/callback", get(not_implemented))
         .route(

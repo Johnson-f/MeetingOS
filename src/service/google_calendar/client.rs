@@ -129,6 +129,26 @@ impl GoogleCalendarClient {
         Ok(())
     }
 
+    /// Stop a push notification channel (best-effort, used on disconnect)
+    pub async fn stop_channel(
+        &self,
+        access_token: &str,
+        channel_id: &str,
+        resource_id: &str,
+    ) -> Result<()> {
+        self.http
+            .post(format!("{}/channels/stop", CALENDAR_API_BASE))
+            .bearer_auth(access_token)
+            .json(&serde_json::json!({
+                "id": channel_id,
+                "resourceId": resource_id,
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     /// List the user's calendars
     pub async fn list_calendars(&self, access_token: &str) -> Result<Vec<CalendarListEntry>> {
         let response = self

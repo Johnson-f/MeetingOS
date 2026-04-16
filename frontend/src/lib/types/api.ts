@@ -16,3 +16,11 @@ export interface CurrentUserResponse {
   user_id: string;
   workspace_id: string;
 }
+
+export interface GoogleCalendarStatusResponse {
+  connected: boolean;
+  status?: "connected" | "auth_required" | "disconnected";
+  calendars_count?: number;
+  last_synced_at?: string | null;
+  connected_at?: string | null;
+}

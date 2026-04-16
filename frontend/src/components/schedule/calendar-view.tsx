@@ -14,8 +14,22 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useMeetingsQuery } from "@/lib/hooks/use-meetings-query"
-import { useGoogleCalendarConnect } from "@/lib/hooks/use-google-calendar"
+import {
+  useGoogleCalendarConnect,
+  useGoogleCalendarDisconnect,
+  useGoogleCalendarResync,
+  useGoogleCalendarStatus,
+} from "@/lib/hooks/use-google-calendar"
+import { toast } from "sonner"
 import { NewMeetingDialog } from "@/components/new-meeting"
 import type { MeetingListItem } from "@/lib/types"
 
@@ -264,6 +278,160 @@ function DayCell({
   )
 }
 
+function GoogleCalendarSection() {
+  const googleConnect = useGoogleCalendarConnect()
+  const googleDisconnect = useGoogleCalendarDisconnect()
+  const googleResync = useGoogleCalendarResync()
+  const { data: status, isLoading } = useGoogleCalendarStatus()
+  const [disconnectOpen, setDisconnectOpen] = React.useState(false)
+
+  function handleDisconnect() {
+    googleDisconnect.mutate(undefined, {
+      onSuccess: () => {
+        setDisconnectOpen(false)
+        toast.success("Google Calendar disconnected")
+      },
+      onError: () => toast.error("Failed to disconnect"),
+    })
+  }
+
+  function handleResync() {
+    googleResync.mutate(undefined, {
+      onSuccess: (data) => {
+        if (data.status === "auth_required") {
+          toast.error("Session expired — please reconnect your Google account")
+        } else {
+          toast.success("Calendar sync started")
+        }
+      },
+      onError: () => toast.error("Failed to sync"),
+    })
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col gap-2 mt-auto pt-4">
+        <span className="text-[0.65rem] font-medium text-muted-foreground uppercase tracking-wider">
+          Calendar
+        </span>
+        <Skeleton className="h-8 w-full" />
+      </div>
+    )
+  }
+
+  // Not connected
+  if (!status?.connected) {
+    return (
+      <div className="flex flex-col gap-2 mt-auto pt-4">
+        <span className="text-[0.65rem] font-medium text-muted-foreground uppercase tracking-wider">
+          Connect a Calendar
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start"
+          onClick={() => googleConnect.mutate()}
+          disabled={googleConnect.isPending}
+        >
+          <HugeiconsIcon icon={Calendar01Icon} strokeWidth={2} className="size-4 mr-2" />
+          Google
+        </Button>
+      </div>
+    )
+  }
+
+  // Connected but auth_required
+  if (status.status === "auth_required") {
+    return (
+      <div className="flex flex-col gap-2 mt-auto pt-4">
+        <span className="text-[0.65rem] font-medium text-muted-foreground uppercase tracking-wider">
+          Google Calendar
+        </span>
+        <Badge variant="outline" className="text-amber-600 w-fit text-[0.6rem]">
+          Reconnect required
+        </Badge>
+        <Button
+          variant="outline"
+          size="sm"
+          className="justify-start"
+          onClick={() => googleConnect.mutate()}
+          disabled={googleConnect.isPending}
+        >
+          <HugeiconsIcon icon={Calendar01Icon} strokeWidth={2} className="size-4 mr-2" />
+          Reconnect Google
+        </Button>
+        <button
+          onClick={() => setDisconnectOpen(true)}
+          className="text-[0.65rem] text-muted-foreground hover:text-destructive transition-colors text-left"
+        >
+          Disconnect
+        </button>
+      </div>
+    )
+  }
+
+  // Connected and healthy
+  return (
+    <div className="flex flex-col gap-2 mt-auto pt-4">
+      <span className="text-[0.65rem] font-medium text-muted-foreground uppercase tracking-wider">
+        Google Calendar
+      </span>
+      <div className="flex items-center gap-1.5">
+        <span className="size-1.5 rounded-full bg-emerald-500" />
+        <span className="text-xs text-muted-foreground">Connected</span>
+        {status.calendars_count != null && (
+          <span className="text-[0.6rem] text-muted-foreground/60">
+            · {status.calendars_count} calendar{status.calendars_count !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+      {status.last_synced_at && (
+        <span className="text-[0.6rem] text-muted-foreground/60">
+          Last synced {new Date(status.last_synced_at).toLocaleString()}
+        </span>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        className="justify-start"
+        onClick={handleResync}
+        disabled={googleResync.isPending}
+      >
+        {googleResync.isPending ? "Syncing..." : "Re-sync now"}
+      </Button>
+      <button
+        onClick={() => setDisconnectOpen(true)}
+        className="text-[0.65rem] text-muted-foreground hover:text-destructive transition-colors text-left"
+      >
+        Disconnect
+      </button>
+
+      <Dialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Disconnect Google Calendar</DialogTitle>
+            <DialogDescription>
+              This will remove all synced calendar data including events and calendars. You can reconnect at any time.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDisconnectOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDisconnect}
+              disabled={googleDisconnect.isPending}
+            >
+              {googleDisconnect.isPending ? "Disconnecting..." : "Disconnect"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 export function CalendarView() {
   const [currentDate, setCurrentDate] = React.useState(() => new Date())
   const year = currentDate.getFullYear()
@@ -274,7 +442,6 @@ export function CalendarView() {
   const [selectedDay, setSelectedDay] = React.useState<Date | null>(null)
   const { data, isLoading } = useMeetingsQuery(100, 0)
   const meetings = data?.items ?? []
-  const googleConnect = useGoogleCalendarConnect()
 
   const monthName = currentDate.toLocaleDateString("en-US", {
     month: "long",
@@ -333,22 +500,7 @@ export function CalendarView() {
           onNextMonth={nextMonth}
         />
 
-        {/* Connect calendar */}
-        <div className="flex flex-col gap-2 mt-auto pt-4">
-          <span className="text-[0.65rem] font-medium text-muted-foreground uppercase tracking-wider">
-            Connect a Calendar
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="justify-start"
-            onClick={() => googleConnect.mutate()}
-            disabled={googleConnect.isPending}
-          >
-            <HugeiconsIcon icon={Calendar01Icon} strokeWidth={2} className="size-4 mr-2" />
-            Google
-          </Button>
-        </div>
+        <GoogleCalendarSection />
       </div>
 
       {/* Main calendar */}

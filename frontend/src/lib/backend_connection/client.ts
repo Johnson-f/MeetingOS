@@ -2,6 +2,7 @@ import type {
   AnalyticsOverview,
   CreateMeetingPayload,
   CurrentUserResponse,
+  GoogleCalendarStatusResponse,
   MeetingActionResponse,
   MeetingMutationResponse,
   MeetingResponse,
@@ -178,6 +179,12 @@ export class BackendClient {
     return this.request<{ status: string }>("/api/v1/calendar/google/resync", {
       method: "POST",
     });
+  }
+
+  getGoogleCalendarStatus() {
+    return this.request<GoogleCalendarStatusResponse>(
+      "/api/v1/calendar/google/status"
+    );
   }
 
   // Chat Threads

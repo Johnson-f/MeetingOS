@@ -222,19 +222,65 @@ pub async fn google_disconnect(
             ApiError::new(StatusCode::NOT_FOUND, "no Google Calendar connection found")
         })?;
 
-    // Revoke the token
-    if let Some(token) = &connection.access_token {
+    let access_token = connection.access_token.as_deref().unwrap_or_default();
+
+    // 1. Stop webhook watches (best-effort)
+    let watches = state
+        .services
+        .turso
+        .get_calendar_watches(&connection.id)
+        .await
+        .unwrap_or_default();
+    for watch in &watches {
+        if let Err(e) = google
+            .stop_channel(access_token, &watch.watch_channel_id, &watch.watch_resource_id)
+            .await
+        {
+            warn!(
+                channel = %watch.watch_channel_id,
+                error = %e,
+                "failed to stop calendar watch (best-effort)"
+            );
+        }
+    }
+
+    // 2. Revoke the refresh token (preferred) or access token
+    if let Some(refresh_token) = &connection.refresh_token {
+        let _ = google.revoke_token(refresh_token).await;
+    } else if let Some(token) = &connection.access_token {
         let _ = google.revoke_token(token).await;
     }
 
-    // Delete connection and related data
+    // 3. Delete calendar events
+    let events_deleted = state
+        .services
+        .turso
+        .delete_events_for_connection(&connection.id)
+        .await
+        .unwrap_or(0);
+
+    // 4. Delete calendars
+    let calendars_deleted = state
+        .services
+        .turso
+        .delete_calendars_for_connection(&connection.id)
+        .await
+        .unwrap_or(0);
+
+    // 5. Soft-delete the connection
     state
         .services
         .turso
         .delete_oauth_connection(&connection.id)
         .await?;
 
-    info!(user_id = %user.user_id, "Google Calendar disconnected");
+    info!(
+        user_id = %user.user_id,
+        events_deleted = events_deleted,
+        calendars_deleted = calendars_deleted,
+        watches_stopped = watches.len(),
+        "Google Calendar disconnected with full cleanup"
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -246,6 +292,13 @@ pub async fn google_resync(
     info!(sub = %jwt.sub, "POST /api/v1/calendar/google/resync");
     let user = current_user(&state, &jwt).await?;
 
+    let google = state.services.google_calendar.as_ref().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Google Calendar is not configured",
+        )
+    })?;
+
     let connection = state
         .services
         .turso
@@ -255,21 +308,90 @@ pub async fn google_resync(
             ApiError::new(StatusCode::NOT_FOUND, "no Google Calendar connection found")
         })?;
 
-    state
+    // Validate the token before queuing a job
+    let refresh_token = connection.refresh_token.as_deref().ok_or_else(|| {
+        ApiError::new(StatusCode::CONFLICT, "no refresh token available")
+    })?;
+
+    match google.refresh_token(refresh_token).await {
+        Ok(tokens) => {
+            // Token is valid — update stored tokens and enqueue sync
+            state
+                .services
+                .turso
+                .update_oauth_tokens(
+                    &connection.id,
+                    &tokens.access_token,
+                    tokens.refresh_token.as_deref(),
+                )
+                .await?;
+
+            // Ensure connection is marked as connected (in case it was auth_required)
+            state
+                .services
+                .turso
+                .update_oauth_connection_status(&connection.id, "connected")
+                .await?;
+
+            state
+                .services
+                .turso
+                .enqueue_job(
+                    "sync_google_calendar",
+                    Some(&format!("resync-{}", connection.id)),
+                    &json!({
+                        "oauth_connection_id": connection.id,
+                        "user_id": user.user_id,
+                        "workspace_id": user.workspace_id,
+                    }),
+                )
+                .await?;
+
+            Ok(Json(json!({ "status": "sync_queued" })))
+        }
+        Err(e) => {
+            warn!(
+                user_id = %user.user_id,
+                error = %e,
+                "resync failed: Google token refresh rejected"
+            );
+
+            // Mark connection as needing re-auth
+            state
+                .services
+                .turso
+                .update_oauth_connection_status(&connection.id, "auth_required")
+                .await?;
+
+            Ok(Json(json!({ "status": "auth_required" })))
+        }
+    }
+}
+
+/// GET /api/v1/calendar/google/status — connection health check
+pub async fn google_status(
+    State(state): State<AppState>,
+    Extension(jwt): Extension<ClerkJwt>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let user = current_user(&state, &jwt).await?;
+
+    match state
         .services
         .turso
-        .enqueue_job(
-            "sync_google_calendar",
-            Some(&format!("resync-{}", connection.id)),
-            &json!({
-                "oauth_connection_id": connection.id,
-                "user_id": user.user_id,
-                "workspace_id": user.workspace_id,
-            }),
-        )
-        .await?;
-
-    Ok(Json(json!({ "status": "sync_queued" })))
+        .get_google_calendar_status(&user.user_id)
+        .await?
+    {
+        Some(status) => Ok(Json(json!({
+            "connected": status.connected,
+            "status": status.status,
+            "calendars_count": status.calendars_count,
+            "last_synced_at": status.last_synced_at,
+            "connected_at": status.connected_at,
+        }))),
+        None => Ok(Json(json!({
+            "connected": false,
+        }))),
+    }
 }
 
 use tracing::warn;

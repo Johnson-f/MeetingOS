@@ -657,7 +657,17 @@ pub(super) async fn sync_google_calendar_job(
                     .await?;
             }
             Err(e) => {
-                warn!(error = %e, "failed to refresh Google token, using existing");
+                warn!(
+                    oauth_connection_id = %oauth_connection_id,
+                    error = %e,
+                    "Google token refresh failed, marking connection as auth_required"
+                );
+                services
+                    .turso
+                    .update_oauth_connection_status(&connection.id, "auth_required")
+                    .await?;
+                // Return Ok to prevent retries — the token is dead, retrying won't help
+                return Ok(());
             }
         }
     }
