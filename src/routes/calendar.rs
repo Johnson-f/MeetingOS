@@ -233,7 +233,11 @@ pub async fn google_disconnect(
         .unwrap_or_default();
     for watch in &watches {
         if let Err(e) = google
-            .stop_channel(access_token, &watch.watch_channel_id, &watch.watch_resource_id)
+            .stop_channel(
+                access_token,
+                &watch.watch_channel_id,
+                &watch.watch_resource_id,
+            )
             .await
         {
             warn!(
@@ -309,9 +313,10 @@ pub async fn google_resync(
         })?;
 
     // Validate the token before queuing a job
-    let refresh_token = connection.refresh_token.as_deref().ok_or_else(|| {
-        ApiError::new(StatusCode::CONFLICT, "no refresh token available")
-    })?;
+    let refresh_token = connection
+        .refresh_token
+        .as_deref()
+        .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "no refresh token available"))?;
 
     match google.refresh_token(refresh_token).await {
         Ok(tokens) => {

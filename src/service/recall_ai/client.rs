@@ -265,10 +265,7 @@ impl RecallAiClient {
                     .get("timestamp")
                     .and_then(Value::as_f64)
                     .unwrap_or(0.0);
-                let duration_s = entry
-                    .get("duration")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0);
+                let duration_s = entry.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
                 let start_ms = (timestamp_s * 1000.0).round() as i64;
                 let end_ms = ((timestamp_s + duration_s) * 1000.0).round() as i64;
 

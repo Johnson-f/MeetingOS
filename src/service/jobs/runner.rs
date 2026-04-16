@@ -211,7 +211,11 @@ async fn renew_expiring_watches(services: &ServiceRegistry) {
 
         // Stop the old watch (best-effort)
         let _ = google
-            .stop_channel(&access_token, &watch.watch_channel_id, &watch.watch_resource_id)
+            .stop_channel(
+                &access_token,
+                &watch.watch_channel_id,
+                &watch.watch_resource_id,
+            )
             .await;
 
         // Register a new watch

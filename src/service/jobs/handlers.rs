@@ -415,7 +415,9 @@ pub(super) async fn transcribe_recording_job(
     // Re-label speaker labels using diarization timeline if available
     let mut segments = groq_response.segments;
     if let Ok(Some(timeline_json)) = services.turso.get_speaker_timeline(recording_id).await {
-        if let Ok(timeline) = serde_json::from_str::<Vec<crate::service::recall_ai::SpeakerSpan>>(&timeline_json) {
+        if let Ok(timeline) =
+            serde_json::from_str::<Vec<crate::service::recall_ai::SpeakerSpan>>(&timeline_json)
+        {
             if !timeline.is_empty() {
                 segments = relabel_segments_with_speakers(&segments, &timeline);
                 info!(

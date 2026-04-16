@@ -33,7 +33,10 @@ pub fn app_router(state: AppState, jwks_provider: MemoryCacheJwksProvider) -> Ro
         .route("/api/v1/status", get(status))
         .route("/api/v1/webhooks/recall", post(recall_webhook))
         .route("/api/v1/events", get(sse_events))
-        .route("/api/v1/webhooks/google-calendar", post(google_calendar_webhook))
+        .route(
+            "/api/v1/webhooks/google-calendar",
+            post(google_calendar_webhook),
+        )
         .route("/api/v1/calendar/google/callback", get(google_callback))
         .route("/api/v1/webhooks/microsoft-graph", post(not_implemented))
         .route("/api/v1/share/{token}", get(get_shared_meeting));
