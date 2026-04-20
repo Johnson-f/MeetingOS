@@ -9,6 +9,10 @@ if [ -n "$(git status --porcelain)" ]; then
   git push
 fi
 
+# show the current (latest) tag, if any
+current_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
+echo "Current tag: ${current_tag}"
+
 # create and push tag
 read -rp "Tag version (e.g. 1.0.0): " version
 git tag "v${version}"
