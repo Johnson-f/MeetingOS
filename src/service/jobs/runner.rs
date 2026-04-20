@@ -131,8 +131,7 @@ async fn run_worker_consumer_loop(services: ServiceRegistry) -> Result<()> {
                     attempt = job.attempt_count,
                     "picked up job"
                 );
-                if let Err(error) = process_job(&services, &job.payload_json, &job.job_type).await
-                {
+                if let Err(error) = process_job(&services, &job.payload_json, &job.job_type).await {
                     warn!(job_id = %job.id, job_type = %job.job_type, %error, "job failed");
 
                     let next_run_after = if job.attempt_count + 1 >= job.max_attempts {
@@ -261,7 +260,10 @@ async fn enqueue_periodic_bot_scheduler(services: &ServiceRegistry) {
 /// respected — expired leases whose next attempt would exceed the limit are
 /// marked `dead` instead.
 async fn run_lease_reaper(services: ServiceRegistry) -> Result<()> {
-    info!(interval_seconds = REAPER_INTERVAL.as_secs(), "lease reaper started");
+    info!(
+        interval_seconds = REAPER_INTERVAL.as_secs(),
+        "lease reaper started"
+    );
     let mut ticker = tokio::time::interval(REAPER_INTERVAL);
     ticker.tick().await; // skip immediate
 
@@ -293,7 +295,11 @@ async fn run_stuck_job_detector(services: ServiceRegistry) -> Result<()> {
 
     loop {
         ticker.tick().await;
-        match services.turso.find_stuck_queued_jobs(STUCK_JOB_AGE_SECS).await {
+        match services
+            .turso
+            .find_stuck_queued_jobs(STUCK_JOB_AGE_SECS)
+            .await
+        {
             Ok(None) => {}
             Ok(Some(report)) => error!(
                 stuck_count = report.count,
@@ -425,4 +431,3 @@ async fn renew_expiring_watches(services: &ServiceRegistry) {
         }
     }
 }
-

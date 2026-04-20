@@ -322,7 +322,11 @@ impl TursoClient {
 
         let oldest_age_seconds = oldest
             .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
-            .map(|dt| (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds().max(0))
+            .map(|dt| {
+                (chrono::Utc::now() - dt.with_timezone(&chrono::Utc))
+                    .num_seconds()
+                    .max(0)
+            })
             .unwrap_or(0);
 
         Ok(JobQueueStats {
@@ -338,8 +342,8 @@ impl TursoClient {
         older_than_seconds: i64,
     ) -> Result<Option<StuckJobReport>> {
         let conn = self.connection().await?;
-        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(older_than_seconds))
-            .to_rfc3339();
+        let cutoff =
+            (chrono::Utc::now() - chrono::Duration::seconds(older_than_seconds)).to_rfc3339();
 
         let mut count_rows = conn
             .query(
@@ -375,7 +379,11 @@ impl TursoClient {
 
         let age_seconds = chrono::DateTime::parse_from_rfc3339(&run_after)
             .ok()
-            .map(|dt| (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds().max(0))
+            .map(|dt| {
+                (chrono::Utc::now() - dt.with_timezone(&chrono::Utc))
+                    .num_seconds()
+                    .max(0)
+            })
             .unwrap_or(0);
 
         Ok(Some(StuckJobReport {

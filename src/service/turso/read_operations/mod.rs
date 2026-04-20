@@ -14,6 +14,6 @@ mod views;
 pub use types::{
     JobQueueStats, MeetingDraft, RecordingRow, StoredJob, StoredMeetingAudioAsset,
     StoredProviderEvent, StoredRecallBot, StoredRecordingAudioAsset, StoredRecordingWithAsset,
-    StoredTranscriptSegment, StoredTranscription, StoredTranscriptionWithSegments,
-    StuckJobReport, UpsertMeetingResult, UserContext,
+    StoredTranscriptSegment, StoredTranscription, StoredTranscriptionWithSegments, StuckJobReport,
+    UpsertMeetingResult, UserContext,
 };
