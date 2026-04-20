@@ -10,7 +10,7 @@ use routes::{AppState, app_router};
 use service::{ServiceRegistry, jobs};
 use service::{auth::create_jwks_provider, turso::client::TursoClient};
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -64,19 +64,16 @@ async fn run_api(config: AppConfig, services: ServiceRegistry) -> Result<(), Box
 }
 
 async fn run_all(config: AppConfig, services: ServiceRegistry) -> Result<(), Box<dyn Error>> {
+    // MUST be supervised — worker_loop is a forever-running future that spawns
+    // further supervised tasks internally. A panic here would silently stop all
+    // background work (scheduler, reaper, stuck-job detector, consumer loop).
     let worker_services = services.clone();
-    let worker_handle = tokio::spawn(async move { jobs::run_worker_loop(worker_services).await });
-    let result = run_api(config, services).await;
-    worker_handle.abort();
+    jobs::supervised("worker_loop", move || {
+        let services = worker_services.clone();
+        async move { jobs::run_worker_loop(services).await }
+    });
 
-    match worker_handle.await {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => error!(%error, "worker exited with an error"),
-        Err(error) if error.is_cancelled() => {}
-        Err(error) => jobs::log_worker_shutdown(&error),
-    }
-
-    result
+    run_api(config, services).await
 }
 
 fn init_tracing() {

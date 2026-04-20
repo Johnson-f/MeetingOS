@@ -12,7 +12,8 @@ mod types;
 mod views;
 
 pub use types::{
-    MeetingDraft, RecordingRow, StoredJob, StoredMeetingAudioAsset, StoredProviderEvent,
-    StoredRecallBot, StoredRecordingAudioAsset, StoredRecordingWithAsset, StoredTranscriptSegment,
-    StoredTranscription, StoredTranscriptionWithSegments, UpsertMeetingResult, UserContext,
+    JobQueueStats, MeetingDraft, RecordingRow, StoredJob, StoredMeetingAudioAsset,
+    StoredProviderEvent, StoredRecallBot, StoredRecordingAudioAsset, StoredRecordingWithAsset,
+    StoredTranscriptSegment, StoredTranscription, StoredTranscriptionWithSegments,
+    StuckJobReport, UpsertMeetingResult, UserContext,
 };

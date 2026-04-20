@@ -263,6 +263,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     run_after TEXT NOT NULL,
     leased_at TEXT,
     lease_owner TEXT,
+    lease_expires_at TEXT,
     last_error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL

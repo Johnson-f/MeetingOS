@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::service::turso::{
     client::{new_id, now_rfc3339},
     read_operations::{
-        StoredJob, StoredProviderEvent, StoredRecallBot,
+        JobQueueStats, StoredJob, StoredProviderEvent, StoredRecallBot, StuckJobReport,
         helpers::{extract_first_i64, extract_first_string, query_optional_string},
     },
 };
@@ -192,10 +192,13 @@ impl TursoClient {
     pub async fn lease_due_job(
         &self,
         lease_owner: &str,
-        _lease_seconds: i64,
+        lease_seconds: i64,
     ) -> Result<Option<StoredJob>> {
         let conn = self.connection().await?;
         let now = now_rfc3339();
+        let expires_at =
+            (chrono::Utc::now() + chrono::Duration::seconds(lease_seconds)).to_rfc3339();
+
         let mut rows = conn
             .query(
                 "SELECT id, job_type, payload_json, attempt_count, max_attempts FROM jobs WHERE status IN ('queued', 'retryable') AND run_after <= ? ORDER BY run_after ASC LIMIT 1",
@@ -210,8 +213,14 @@ impl TursoClient {
         let id = row.get::<String>(0)?;
         let changed = conn
             .execute(
-                "UPDATE jobs SET status = 'leased', leased_at = ?, lease_owner = ?, updated_at = ? WHERE id = ? AND status IN ('queued', 'retryable')",
-                (now.as_str(), lease_owner, now.as_str(), id.as_str()),
+                "UPDATE jobs SET status = 'leased', leased_at = ?, lease_owner = ?, lease_expires_at = ?, updated_at = ? WHERE id = ? AND status IN ('queued', 'retryable')",
+                (
+                    now.as_str(),
+                    lease_owner,
+                    expires_at.as_str(),
+                    now.as_str(),
+                    id.as_str(),
+                ),
             )
             .await?;
 
@@ -233,11 +242,148 @@ impl TursoClient {
         let now = now_rfc3339();
         let changed = conn
             .execute(
-                "UPDATE jobs SET status = 'queued', leased_at = NULL, lease_owner = NULL, updated_at = ? WHERE status = 'leased'",
+                "UPDATE jobs SET status = 'queued', leased_at = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE status = 'leased'",
                 params![now.as_str()],
             )
             .await?;
         Ok(changed)
+    }
+
+    /// Reset jobs whose lease has expired back to 'queued' (or mark 'dead' if
+    /// max_attempts exceeded). Meant to be called periodically by the reaper.
+    /// Returns (requeued_count, dead_count).
+    pub async fn reap_expired_leases(&self) -> Result<(u64, u64)> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+
+        let dead = conn
+            .execute(
+                "UPDATE jobs
+                 SET status = 'dead',
+                     leased_at = NULL,
+                     lease_owner = NULL,
+                     lease_expires_at = NULL,
+                     attempt_count = attempt_count + 1,
+                     last_error = COALESCE(last_error, 'lease expired'),
+                     updated_at = ?
+                 WHERE status = 'leased'
+                   AND lease_expires_at IS NOT NULL
+                   AND lease_expires_at < ?
+                   AND attempt_count + 1 >= max_attempts",
+                (now.as_str(), now.as_str()),
+            )
+            .await?;
+
+        let requeued = conn
+            .execute(
+                "UPDATE jobs
+                 SET status = 'queued',
+                     leased_at = NULL,
+                     lease_owner = NULL,
+                     lease_expires_at = NULL,
+                     attempt_count = attempt_count + 1,
+                     last_error = COALESCE(last_error, 'lease expired'),
+                     updated_at = ?
+                 WHERE status = 'leased'
+                   AND lease_expires_at IS NOT NULL
+                   AND lease_expires_at < ?",
+                (now.as_str(), now.as_str()),
+            )
+            .await?;
+
+        Ok((requeued, dead))
+    }
+
+    /// Snapshot of the job queue for heartbeat + stuck-job detection.
+    pub async fn get_job_queue_stats(&self) -> Result<JobQueueStats> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+
+        let mut rows = conn
+            .query(
+                "SELECT
+                    SUM(CASE WHEN status IN ('queued','retryable') AND run_after <= ? THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN status = 'leased' THEN 1 ELSE 0 END) AS leased,
+                    MIN(CASE WHEN status IN ('queued','retryable') AND run_after <= ? THEN run_after END) AS oldest
+                 FROM jobs",
+                params![now.as_str(), now.as_str()],
+            )
+            .await?;
+
+        let (pending, leased, oldest) = if let Some(row) = rows.next().await? {
+            (
+                row.get::<Option<i64>>(0)?.unwrap_or(0),
+                row.get::<Option<i64>>(1)?.unwrap_or(0),
+                row.get::<Option<String>>(2)?,
+            )
+        } else {
+            (0, 0, None)
+        };
+
+        let oldest_age_seconds = oldest
+            .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+            .map(|dt| (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds().max(0))
+            .unwrap_or(0);
+
+        Ok(JobQueueStats {
+            pending_count: pending,
+            leased_count: leased,
+            oldest_queued_age_seconds: oldest_age_seconds,
+        })
+    }
+
+    /// Return count + oldest row for jobs queued longer than `older_than_seconds`.
+    pub async fn find_stuck_queued_jobs(
+        &self,
+        older_than_seconds: i64,
+    ) -> Result<Option<StuckJobReport>> {
+        let conn = self.connection().await?;
+        let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(older_than_seconds))
+            .to_rfc3339();
+
+        let mut count_rows = conn
+            .query(
+                "SELECT COUNT(*) FROM jobs WHERE status = 'queued' AND run_after < ?",
+                params![cutoff.as_str()],
+            )
+            .await?;
+        let count = count_rows
+            .next()
+            .await?
+            .and_then(|r| r.get::<i64>(0).ok())
+            .unwrap_or(0);
+
+        if count == 0 {
+            return Ok(None);
+        }
+
+        let mut oldest_rows = conn
+            .query(
+                "SELECT id, job_type, run_after FROM jobs WHERE status = 'queued' AND run_after < ? ORDER BY run_after ASC LIMIT 1",
+                params![cutoff.as_str()],
+            )
+            .await?;
+        let (id, job_type, run_after) = if let Some(row) = oldest_rows.next().await? {
+            (
+                row.get::<String>(0)?,
+                row.get::<String>(1)?,
+                row.get::<String>(2)?,
+            )
+        } else {
+            return Ok(None);
+        };
+
+        let age_seconds = chrono::DateTime::parse_from_rfc3339(&run_after)
+            .ok()
+            .map(|dt| (chrono::Utc::now() - dt.with_timezone(&chrono::Utc)).num_seconds().max(0))
+            .unwrap_or(0);
+
+        Ok(Some(StuckJobReport {
+            count,
+            oldest_job_id: id,
+            oldest_job_type: job_type,
+            oldest_age_seconds: age_seconds,
+        }))
     }
 
     pub async fn complete_job(&self, job_id: &str) -> Result<()> {

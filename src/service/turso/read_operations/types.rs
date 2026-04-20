@@ -48,6 +48,21 @@ pub struct StoredJob {
     pub max_attempts: i64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct JobQueueStats {
+    pub pending_count: i64,
+    pub leased_count: i64,
+    pub oldest_queued_age_seconds: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StuckJobReport {
+    pub count: i64,
+    pub oldest_job_id: String,
+    pub oldest_job_type: String,
+    pub oldest_age_seconds: i64,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StoredRecordingAudioAsset {
