@@ -1,3 +1,0 @@
-{$DOMAIN:localhost} {
-	reverse_proxy host.docker.internal:9010
-}
