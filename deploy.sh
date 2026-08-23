@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Configure to any domain 
 HOST="myserver"
 DOMAIN="meet.tradstry.com"
 DEPLOY_DIR="/opt/meeting-bot"

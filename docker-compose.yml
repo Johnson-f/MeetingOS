@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${DOCKER_IMAGE:-meeting-bot}
+    image: ${DOCKER_IMAGE:-meeting-os}
     build: .
     env_file: .env.production
     environment:

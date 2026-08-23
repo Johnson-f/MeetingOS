@@ -27,4 +27,4 @@ ENV PORT=9010
 
 EXPOSE 9010
 
-CMD ["./meeting-bot"]
+CMD ["./meeting-os"]
