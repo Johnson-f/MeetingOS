@@ -1,0 +1,505 @@
+use anyhow::Result;
+use libsql::params;
+
+use crate::service::{
+    recall_ai::{GeneratedNote, GroqSegment},
+    turso::{
+        client::{new_id, now_rfc3339},
+        read_operations::{
+            RecordingRow, StoredMeetingAudioAsset, StoredRecordingAudioAsset,
+            StoredRecordingWithAsset, StoredTranscription, helpers::query_optional_string,
+        },
+    },
+};
+
+use super::super::client::TursoClient;
+
+impl TursoClient {
+    pub async fn upsert_recording_for_bot(
+        &self,
+        meeting_id: &str,
+        recall_bot_id: &str,
+        recall_recording_id: Option<&str>,
+        duration_seconds: Option<i64>,
+        started_at: Option<&str>,
+        ended_at: Option<&str>,
+        status: &str,
+    ) -> Result<RecordingRow> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+
+        if let Some(existing_id) = query_optional_string(
+            &conn,
+            "SELECT id FROM recordings WHERE meeting_id = ? AND ((recall_recording_id IS NOT NULL AND recall_recording_id = ?) OR (recall_bot_id = ?)) LIMIT 1",
+            (meeting_id, recall_recording_id, recall_bot_id),
+        )
+        .await?
+        {
+            conn.execute(
+                "UPDATE recordings
+                 SET recall_recording_id = COALESCE(?, recall_recording_id),
+                     status = ?, duration_seconds = COALESCE(?, duration_seconds),
+                     started_at = COALESCE(?, started_at), ended_at = COALESCE(?, ended_at),
+                     updated_at = ?
+                 WHERE id = ?",
+                (
+                    recall_recording_id,
+                    status,
+                    duration_seconds,
+                    started_at,
+                    ended_at,
+                    now.as_str(),
+                    existing_id.as_str(),
+                ),
+            )
+            .await?;
+            return Ok(RecordingRow {
+                id: existing_id,
+                meeting_id: meeting_id.to_owned(),
+            });
+        }
+
+        let id = new_id();
+        conn.execute(
+            "INSERT INTO recordings (
+                id, meeting_id, recall_bot_id, recall_recording_id, status, duration_seconds, started_at, ended_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                id.as_str(),
+                meeting_id,
+                recall_bot_id,
+                recall_recording_id,
+                status,
+                duration_seconds,
+                started_at,
+                ended_at,
+                now.as_str(),
+                now.as_str(),
+            ),
+        )
+        .await?;
+
+        Ok(RecordingRow {
+            id,
+            meeting_id: meeting_id.to_owned(),
+        })
+    }
+
+    pub async fn upsert_recording_asset(
+        &self,
+        recording_id: &str,
+        asset_kind: &str,
+        provider: &str,
+        provider_asset_id: Option<&str>,
+        source_download_url_last_seen: Option<&str>,
+        mime_type: Option<&str>,
+        status: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        let inserted = conn
+            .execute(
+                "INSERT OR IGNORE INTO recording_assets (
+                    id, recording_id, asset_kind, provider, provider_asset_id, source_download_url_last_seen, mime_type, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_id(),
+                    recording_id,
+                    asset_kind,
+                    provider,
+                    provider_asset_id,
+                    source_download_url_last_seen,
+                    mime_type,
+                    status,
+                    now.as_str(),
+                    now.as_str(),
+                ),
+            )
+            .await?;
+
+        if inserted == 0 {
+            conn.execute(
+                "UPDATE recording_assets
+                 SET provider_asset_id = COALESCE(?, provider_asset_id),
+                     source_download_url_last_seen = COALESCE(?, source_download_url_last_seen),
+                     mime_type = COALESCE(?, mime_type),
+                     status = ?, updated_at = ?
+                 WHERE recording_id = ? AND asset_kind = ?",
+                (
+                    provider_asset_id,
+                    source_download_url_last_seen,
+                    mime_type,
+                    status,
+                    now.as_str(),
+                    recording_id,
+                    asset_kind,
+                ),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn set_recording_asset_status(
+        &self,
+        recording_id: &str,
+        asset_kind: &str,
+        status: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        conn.execute(
+            "UPDATE recording_assets SET status = ?, updated_at = ? WHERE recording_id = ? AND asset_kind = ?",
+            (status, now.as_str(), recording_id, asset_kind),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn mark_recording_asset_stored(
+        &self,
+        recording_id: &str,
+        asset_kind: &str,
+        storage_bucket: &str,
+        storage_key: &str,
+        byte_size: i64,
+        checksum_sha256: &str,
+        mime_type: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        conn.execute(
+            "UPDATE recording_assets
+             SET storage_bucket = ?,
+                 storage_key = ?,
+                 byte_size = ?,
+                 checksum_sha256 = ?,
+                 mime_type = ?,
+                 status = 'stored',
+                 updated_at = ?
+             WHERE recording_id = ? AND asset_kind = ?",
+            (
+                storage_bucket,
+                storage_key,
+                byte_size,
+                checksum_sha256,
+                mime_type,
+                now.as_str(),
+                recording_id,
+                asset_kind,
+            ),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_recording_with_audio_asset(
+        &self,
+        recording_id: &str,
+    ) -> Result<Option<StoredRecordingWithAsset>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                r#"
+                SELECT
+                    r.id,
+                    r.meeting_id,
+                    ra.status,
+                    ra.storage_bucket,
+                    ra.storage_key,
+                    ra.mime_type,
+                    ra.byte_size,
+                    ra.checksum_sha256,
+                    ra.source_download_url_last_seen
+                FROM recordings r
+                LEFT JOIN recording_assets ra
+                    ON ra.recording_id = r.id AND ra.asset_kind = 'audio_mixed_mp3'
+                WHERE r.id = ?
+                LIMIT 1
+                "#,
+                params![recording_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(Some(StoredRecordingWithAsset {
+                id: row.get::<String>(0)?,
+                meeting_id: row.get::<String>(1)?,
+                audio_asset: if row.get::<Option<String>>(2)?.is_some()
+                    || row.get::<Option<String>>(3)?.is_some()
+                    || row.get::<Option<String>>(4)?.is_some()
+                    || row.get::<Option<String>>(8)?.is_some()
+                {
+                    Some(StoredRecordingAudioAsset {
+                        status: row.get::<Option<String>>(2)?,
+                        storage_bucket: row.get::<Option<String>>(3)?,
+                        storage_key: row.get::<Option<String>>(4)?,
+                        mime_type: row.get::<Option<String>>(5)?,
+                        byte_size: row.get::<Option<i64>>(6)?,
+                        checksum_sha256: row.get::<Option<String>>(7)?,
+                        source_download_url_last_seen: row.get::<Option<String>>(8)?,
+                    })
+                } else {
+                    None
+                },
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub async fn get_audio_asset_for_meeting(
+        &self,
+        meeting_id: &str,
+    ) -> Result<Option<StoredMeetingAudioAsset>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                r#"
+                SELECT
+                    ra.status,
+                    ra.storage_bucket,
+                    ra.storage_key
+                FROM recordings r
+                INNER JOIN recording_assets ra
+                    ON ra.recording_id = r.id AND ra.asset_kind = 'audio_mixed_mp3'
+                WHERE r.meeting_id = ?
+                ORDER BY r.created_at DESC
+                LIMIT 1
+                "#,
+                params![meeting_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(Some(StoredMeetingAudioAsset {
+                status: row.get::<Option<String>>(0)?,
+                storage_bucket: row.get::<Option<String>>(1)?,
+                storage_key: row.get::<Option<String>>(2)?,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub async fn replace_transcription(
+        &self,
+        meeting_id: &str,
+        recording_id: &str,
+        provider: &str,
+        model: &str,
+        language: Option<&str>,
+        full_text: &str,
+        raw_response_json: &str,
+        segments: Vec<GroqSegment>,
+    ) -> Result<StoredTranscription> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        let id = new_id();
+        conn.execute(
+            "INSERT INTO transcriptions (
+                id, meeting_id, recording_id, provider, model, language, status, full_text,
+                raw_response_json, started_at, completed_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?)",
+            (
+                id.as_str(),
+                meeting_id,
+                recording_id,
+                provider,
+                model,
+                language,
+                full_text,
+                raw_response_json,
+                now.as_str(),
+                now.as_str(),
+                now.as_str(),
+                now.as_str(),
+            ),
+        )
+        .await?;
+
+        for segment in segments {
+            conn.execute(
+                "INSERT INTO transcript_segments (
+                    id, transcription_id, seq, speaker_label, start_ms, end_ms, text, confidence_json, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_id(),
+                    id.as_str(),
+                    segment.seq,
+                    segment.speaker_label,
+                    segment.start_ms,
+                    segment.end_ms,
+                    segment.text,
+                    segment.confidence_json,
+                    segment.raw_json,
+                ),
+            )
+            .await?;
+        }
+
+        conn.execute(
+            "UPDATE meetings SET processing_status = 'transcribed', updated_at = ? WHERE id = ?",
+            (now.as_str(), meeting_id),
+        )
+        .await?;
+
+        Ok(StoredTranscription {
+            id,
+            full_text: Some(full_text.to_owned()),
+        })
+    }
+
+    pub async fn get_transcription_with_segments(
+        &self,
+        transcription_id: &str,
+    ) -> Result<Option<super::StoredTranscriptionWithSegments>> {
+        let base = self.get_transcription(transcription_id).await?;
+        let Some(base) = base else { return Ok(None) };
+
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT text, start_ms, end_ms, speaker_label FROM transcript_segments WHERE transcription_id = ? ORDER BY seq ASC",
+                params![transcription_id],
+            )
+            .await?;
+
+        let mut segments = Vec::new();
+        while let Some(row) = rows.next().await? {
+            segments.push(super::StoredTranscriptSegment {
+                text: row.get::<String>(0)?,
+                start_ms: row.get::<i64>(1)?,
+                end_ms: row.get::<i64>(2)?,
+                speaker_label: row.get::<Option<String>>(3)?,
+            });
+        }
+
+        Ok(Some(super::StoredTranscriptionWithSegments {
+            full_text: base.full_text,
+            segments,
+        }))
+    }
+
+    pub async fn get_transcription(
+        &self,
+        transcription_id: &str,
+    ) -> Result<Option<StoredTranscription>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, full_text FROM transcriptions WHERE id = ? LIMIT 1",
+                params![transcription_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(Some(StoredTranscription {
+                id: row.get::<String>(0)?,
+                full_text: row.get::<Option<String>>(1)?,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub async fn replace_note(
+        &self,
+        meeting_id: &str,
+        transcription_id: &str,
+        provider: &str,
+        model: &str,
+        prompt_version: &str,
+        note: GeneratedNote,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        let now = now_rfc3339();
+        let note_id = new_id();
+        conn.execute(
+            "INSERT INTO notes (
+                id, meeting_id, transcription_id, provider, model, prompt_version, status,
+                title, summary_markdown, key_points_json, decisions_json, risks_json, generated_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                note_id.as_str(),
+                meeting_id,
+                transcription_id,
+                provider,
+                model,
+                prompt_version,
+                note.title,
+                note.summary_markdown,
+                serde_json::to_string(&note.key_points)?,
+                serde_json::to_string(&note.decisions)?,
+                serde_json::to_string(&note.risks)?,
+                now.as_str(),
+                now.as_str(),
+                now.as_str(),
+            ),
+        )
+        .await?;
+
+        for (index, action_item) in note.action_items.into_iter().enumerate() {
+            conn.execute(
+                "INSERT INTO action_items (
+                    id, note_id, meeting_id, assignee_name, assignee_email, description, due_date, priority, status, sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_id(),
+                    note_id.as_str(),
+                    meeting_id,
+                    action_item.assignee_name,
+                    action_item.assignee_email,
+                    action_item.description,
+                    action_item.due_date,
+                    action_item.priority,
+                    action_item.status,
+                    index as i64,
+                    now.as_str(),
+                    now.as_str(),
+                ),
+            )
+            .await?;
+        }
+
+        conn.execute(
+            "UPDATE meetings SET latest_note_id = ?, status = 'completed', processing_status = 'completed', updated_at = ? WHERE id = ?",
+            (note_id.as_str(), now.as_str(), meeting_id),
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn store_speaker_timeline(
+        &self,
+        recording_id: &str,
+        timeline_json: &str,
+    ) -> Result<()> {
+        let conn = self.connection().await?;
+        conn.execute(
+            "UPDATE recordings SET speaker_timeline_json = ?, updated_at = ? WHERE id = ?",
+            (timeline_json, now_rfc3339(), recording_id),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_speaker_timeline(&self, recording_id: &str) -> Result<Option<String>> {
+        let conn = self.connection().await?;
+        let mut rows = conn
+            .query(
+                "SELECT speaker_timeline_json FROM recordings WHERE id = ? LIMIT 1",
+                params![recording_id],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            return Ok(row.get::<Option<String>>(0)?);
+        }
+        Ok(None)
+    }
+}

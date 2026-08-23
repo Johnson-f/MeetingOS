@@ -1,0 +1,7 @@
+target/
+frontend/
+.git/
+.env
+.env.*
+*.md
+start.sh
